@@ -4,6 +4,7 @@
 #include <strings.h>
 #include <ncurses.h>
 #include <errno.h>
+#include "dat.h"
 
 #define ROWWIDTH 16 // Hex displays 16 bytes per row.  Suck it.
 #define ROWPREFIX 10
@@ -89,7 +90,7 @@ int readall(FILE *in, unsigned char **dataptr, size_t *sizeptr)
     return READALL_OK;
 }
 
-WINDOW *hex, *dis, *cmd;
+WINDOW *hex, *dispad, *cmd;
 
 void Message(char *s, ...) {
 	char *buf; 
@@ -108,13 +109,14 @@ void Unimplemented(char *s) {
 	Message(s);
 }
 
-void fill(unsigned char *buf, int len, int pos, int top, int bottom, attr_t attrs, int fillcolor) {
+// Fill 
+void fill(unsigned char *buf, int len, int pos, int top, int bottom, attr_t attrs, int addrcolor, int fillcolor) {
 	attr_t oattrs;
 	short color;
 	scrollok(hex, 0);
 	wattr_get(hex, &oattrs, &color, NULL);
 	for(int i = top ; i < bottom; i++) {
-		wattr_set(hex, oattrs, color, NULL);
+		wattr_set(hex, oattrs, addrcolor, NULL);
 		mvwprintw(hex, i, 0, "%08x: ", pos);
 		for (int j = 0; j < ROWWIDTH/2; j++) {
 			wattr_set(hex, attrs, fillcolor, NULL);
@@ -135,8 +137,7 @@ typedef struct {
 	int windowoffset;
 	int datamode; // When true, you're sweeping out data until you hit 'd' again.
 	int dmstartoffset;
-	unsigned char *buf;
-	size_t len;
+	Buffer *buf;
 } State;
 
 static State state;
@@ -202,12 +203,12 @@ void hexmoveselection(int oldpos, int pos) {
 		// We now have to fill lines between oldoffset and pos.
 		if (nlines > hy) nlines = hy;
 Message("target pos %0x at (r,c): %d, %d; hy = %d; nlines = %d", pos, r, c, hy, nlines);
-		fill(state.buf, state.len, state.windowoffset, 0, nlines, 0, color);
+		fill(state.buf->bytes, state.buf->len, state.windowoffset, 0, nlines, 0, NORMALMODE, color);
 	} else if (r >= hy) {
 		int nlines = r - hy + 1; 
 		wscrl(hex, nlines);
 		state.windowoffset += nlines * ROWWIDTH;
-		fill(state.buf, state.len, state.windowoffset + (hy-nlines)*ROWWIDTH, hy-nlines, hy, 0, color);
+		fill(state.buf->bytes, state.buf->len, state.windowoffset + (hy-nlines)*ROWWIDTH, hy-nlines, hy, 0, NORMALMODE, color);
 	}
 	
 	hexstandout(pos, 1);
@@ -221,21 +222,22 @@ void markasdata(int begin, int end) {
 	Unimplemented("markasdata");
 }
 
-void interact(unsigned char *buf, size_t len) {
+void interact(Buffer *buf) {
 	state.buf = buf;
-	state.len = len;
 	noecho();
 	start_color();
 	initColors();
 	curs_set(2);
+	clear();
+	refresh();
 
 	// 01234567: 0123 4567  0123 4567  0123 4567  0123 4567 
 	int hexwidth = 8 + 2 + 4 * 11;
-	int diswidth = COLS - hexwidth;
+//	int diswidth = COLS - hexwidth;
 	hex = newwin(LINES-1, hexwidth, 0, 0);
 	box(hex,0,0);
-	dis = newwin(LINES-1, diswidth, 0, hexwidth);
-	box(dis,0,0);
+//	dis = newwin(LINES-1, diswidth, 0, hexwidth);
+//	box(dis,0,0);
 	cmd = newwin(1, COLS, LINES-1, 0);
 	box(cmd,0,0);
 	
@@ -243,20 +245,23 @@ void interact(unsigned char *buf, size_t len) {
 	scrollok(hex, 1);
 	wmove(hex, 0, 0);
 	wrefresh(hex);
-	wprintw(dis, "Disassembly");
-	wmove(dis, 0, 0);
-	wrefresh(dis);
-	wprintw(cmd, ":read %d bytes", len);
+//	wprintw(dis, "Disassembly");
+//	wmove(dis, 0, 0);
+//	wrefresh(dis);
+	wprintw(cmd, ":read %d bytes", buf->len);
 	wmove(cmd, 0, 0);
 	wrefresh(cmd);
 
 	// Fill the first screen
-	fill(buf, len, 0, 0, LINES, 0, 1);
+	attron(COLOR_PAIR(NORMALMODE));
+	fill(buf->bytes, buf->len, 0, 0, LINES, 0, NORMALMODE, NORMALMODE);
 	
 	hexmoveselection(0,0);
 
 	wrefresh(hex);
 
+	// Show the disassembly
+	prefresh(dispad, 0, 0, 0, hexwidth, LINES-1, COLS-1);
 
 	int repeats = 0;
 	int hascount = 0;
@@ -264,7 +269,7 @@ void interact(unsigned char *buf, size_t len) {
 	int hexmode = 0;
 
 	while (1) {
-		char ch = wgetch(hex);
+		char ch = getch();
 		if ( ch == 27 ) return;
 
 		char cbuf[512];
@@ -331,7 +336,7 @@ void interact(unsigned char *buf, size_t len) {
 		case 'j':
 				oldoffset = state.offset;
 				state.offset+=repeats*ROWWIDTH;
-				if (state.offset > len) state.offset = len;
+				if (state.offset > state.buf->len) state.offset = state.buf->len;
 				hexmoveselection(oldoffset, state.offset);
 				break;
 		case 'k':
@@ -343,20 +348,20 @@ void interact(unsigned char *buf, size_t len) {
 		case 'l':
 				oldoffset = state.offset;
 				state.offset+=repeats;
-				if (state.offset > len) state.offset = len;
+				if (state.offset > state.buf->len) state.offset = state.buf->len;
 				hexmoveselection(oldoffset, state.offset);
 				break;
 		case 'g':
 				oldoffset = state.offset;
 				state.offset = ROWWIDTH * repeats;
-				if (state.offset > len) state.offset = len;
+				if (state.offset > state.buf->len) state.offset = state.buf->len;
 				hexmoveselection(oldoffset, state.offset);
 				break;
 		case 'G': 
 				oldoffset = state.offset;
-				if (hascount==0) repeats = len-1;
+				if (hascount==0) repeats = state.buf->len-1;
 				state.offset = repeats;
-				if (state.offset > len) state.offset = len;
+				if (state.offset > state.buf->len) state.offset = state.buf->len;
 				hexmoveselection(oldoffset, state.offset);
 				break;
 		}
@@ -368,11 +373,7 @@ void interact(unsigned char *buf, size_t len) {
 
 int main(void)
 {	
-	initscr();			/* Start curses mode 		  */
-	cbreak();
-
-	printw("Press a key to exit\n");
-	refresh();			/* Print it on to the real screen */
+	extern void loadanddis(Buffer *);
 
 	// Read our file
 	FILE *fp = fopen("W2SYS.BIN", "r");
@@ -380,13 +381,25 @@ int main(void)
 		fprintf(stderr, "Could not open file\n");
 		exit(-1);
 	}
-	unsigned char *buf;
-	size_t len;
-	readall(fp, &buf, &len);
+	Buffer buf;
 
-	interact(buf, len);
+	readall(fp, &buf.bytes, &buf.len);
+
+	loadanddis(&buf);
+
+	initscr();			/* Start curses mode 		  */
+	cbreak();
+	nonl(); intrflush(stdscr, FALSE); keypad(stdscr, TRUE);
+
+	// Prep the pad for disassembly
+	dispad = newpad(listing.usedlines, 80);
+	for(int i=0; i < listing.usedlines; i++) {
+		wprintw(dispad, "%s", listing.lines[i]->asm);
+	}
+
+	buf.curptr = buf.bytes;
+	interact(&buf);
 
 	endwin();			/* End curses mode		  */
-
 	return 0;
 }

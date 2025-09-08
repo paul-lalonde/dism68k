@@ -1,5 +1,12 @@
 typedef struct DisLine DisLine;
 typedef struct Listing Listing;
+typedef struct Buffer Buffer;
+
+struct Buffer {
+	unsigned char *bytes;
+	size_t len;
+	unsigned char *curptr;
+};
 
 struct DisLine {
 	char *asm;
@@ -13,3 +20,5 @@ struct Listing {
 };
 
 extern Listing listing;
+
+extern void loadmap(char *name);
