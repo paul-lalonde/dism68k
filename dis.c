@@ -138,6 +138,7 @@ typedef struct {
 	int datamode; // When true, you're sweeping out data until you hit 'd' again.
 	int dmstartoffset;
 	Buffer *buf;
+	Labels *labels;
 } State;
 
 static State state;
@@ -178,6 +179,33 @@ void blink(int pos, int on) {
 }
 void hexstandout(int pos, int on) {
 	stylebyte(pos, on, A_STANDOUT);
+}
+
+int exec(char *s) {
+	// This should really be a little language, like ed.
+	// <range><cmd>/<param>/  
+	// But for now it's a hack.
+	if (strlen(s) < 1) return FALSE;
+
+	switch(s[0]) {
+	case 'n':
+		addLabel(state.labels, s+1, state.offset);
+		break;
+	case 'p':
+		if (s[1] == 0) {
+			strcat(s, "labels.txt");
+		}
+		FILE *fp = fopen(s+1, "w");
+		for(int i=0; i < state.labels->len; i++) {
+			fprintf(fp,"%0x %s\n", state.labels->labels[i].addr, state.labels->labels[i].name);
+		}
+		fclose(fp);
+		break;
+	case 'q':
+		return TRUE;
+			
+	}
+	return FALSE;
 }
 
 void hexmoveselection(int oldpos, int pos) {
@@ -222,8 +250,9 @@ void markasdata(int begin, int end) {
 	Unimplemented("markasdata");
 }
 
-void interact(Buffer *buf) {
+void interact(Buffer *buf, Labels *labels) {
 	state.buf = buf;
+	state.labels = labels;
 	noecho();
 	start_color();
 	initColors();
@@ -320,11 +349,23 @@ void interact(Buffer *buf) {
 					state.datamode = 1;
 				}
 				break;
+		case 'D': // Disassemble starting here
+				Unimplemented("Disassemble");
+				break;
 		case '/': // Search
 				Unimplemented("Search");
 				break;
 		case ':':
-				Unimplemented("Command");
+				{
+				char buf[128];
+				nodelay(cmd, FALSE);
+				echo();
+				mvwaddch(cmd, 0,0, ':');
+				mvwgetnstr(cmd, 0,2, buf, 128);
+				noecho();
+				if (exec(buf)) return;
+				Message("Command: %s", buf);
+				}
 				break;
 
 		case 'h':
@@ -372,11 +413,15 @@ void interact(Buffer *buf) {
 }
 
 int main(void)
-{	
-	extern void loadanddis(Buffer *);
+{	// yes, we need command line parsing now.
+
+	Labels *labels = newLabels(128);
+	FILE *fp = fopen("labels.txt", "r");
+	freadLabels(fp, labels);
+	fclose(fp);
 
 	// Read our file
-	FILE *fp = fopen("W2SYS.BIN", "r");
+	fp = fopen("W2SYS.BIN", "r");
 	if (fp == NULL) {
 		fprintf(stderr, "Could not open file\n");
 		exit(-1);
@@ -384,8 +429,9 @@ int main(void)
 	Buffer buf;
 
 	readall(fp, &buf.bytes, &buf.len);
+	fclose(fp);
 
-	loadanddis(&buf);
+	loadanddis(&buf, labels);
 
 	initscr();			/* Start curses mode 		  */
 	cbreak();
@@ -398,7 +444,7 @@ int main(void)
 	}
 
 	buf.curptr = buf.bytes;
-	interact(&buf);
+	interact(&buf, labels);
 
 	endwin();			/* End curses mode		  */
 	return 0;

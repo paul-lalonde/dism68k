@@ -38,6 +38,7 @@ void clearListing(Listing *listing) {
 	}
 	listing->usedlines = 0;
 }
+
 void initListing(Listing *l) {
 	if (listing.lines != NULL) {
 		clearListing(l);
@@ -368,7 +369,7 @@ int getmode(int instruction) {
 	return mode;
 }
 
-void disasm(unsigned long int start, unsigned long int end) {
+void disasm(unsigned long int start, unsigned long int end, Labels *labels) {
 	address = start;
 	if (address < romstart) {
 		gBufprintf("Address < RomStart in disasm()!\n");
@@ -660,7 +661,10 @@ void disasm(unsigned long int start, unsigned long int end) {
 						if (offset != 0) {
 							if (offset >= 128) offset -= 256;
 							if (!rawmode) {
-								sprintf(operand_s, "$%08x", address + offset);
+								int label = searchLabelsByAddr(labels, address+offset);
+								char buf[128];
+								sprintf(buf, "(%s)", labels->labels[label].name);
+								sprintf(operand_s, "$%08x%s", address + offset, (labels->labels[label].addr == address + offset)?buf:"");
 							} else {
 								sprintf(operand_s, "*%+d", offset);
 							}
@@ -668,7 +672,10 @@ void disasm(unsigned long int start, unsigned long int end) {
 							offset = getword(gBuf);
 							if (offset >= 32768l) offset -= 65536l;
 							if (!rawmode) {
-								sprintf(operand_s, "$%08x" , address - 2 + offset);
+								int label = searchLabelsByAddr(labels, address+offset);
+								char buf[128];
+								sprintf(buf, "(%s)", labels->labels[label].name);
+								sprintf(operand_s, "$%08x%s" , address - 2 + offset, (labels->labels[label].addr == address + offset)?buf:"");
 							} else {
 								sprintf(operand_s, "*%+d", offset);
 							}
@@ -1307,7 +1314,7 @@ void datadump(uint32_t start, uint32_t end) {
 	}
 }
 
-int rundis(char *mapfilename) {
+int rundis(char *mapfilename, Labels *labels) {
 
 	if (!readmap(mapfilename)) {
 		return EXIT_FAILURE;
@@ -1317,19 +1324,19 @@ int rundis(char *mapfilename) {
 	while (map[index].type != End) {
 		gBufprintf(index ? "\n" : "");
 		if (map[index].type == Data) datadump(map[index].start, map[index].end);
-		if (map[index].type == Code) disasm(map[index].start, map[index].end);
+		if (map[index].type == Code) disasm(map[index].start, map[index].end, labels);
 		++ index;
 	}
 	return 0;
 }
 
 
-void loadanddis(Buffer *b) {
+void loadanddis(Buffer *b, Labels *labels) {
 	char *mapfilename = "mapfile";
 
 	extern int readall(FILE *, unsigned char **, size_t *);
 
 	gBuf = b;
-	rundis(mapfilename);
+	rundis(mapfilename, labels);
 }
 

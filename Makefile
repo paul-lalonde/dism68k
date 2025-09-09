@@ -1,8 +1,10 @@
 CC = clang
 CFLAGS = -g -std=c99 -pedantic -Wall
-OBJECTS = dis.o dis68k.o
+OBJECTS = dis.o dis68k.o label.o
 
 all: dis
+
+label.o: label.c
 
 dis.o: dis.c
 	$(CC) $(CFLAGS) -c dis.c
