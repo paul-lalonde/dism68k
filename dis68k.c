@@ -17,24 +17,28 @@
 #include <stdarg.h>
 #include "dat.h"
 
+uint32_t address, romstart;
+bool rawmode = false;
+
 void freeDisLine(DisLine *dl) {
 	free(dl->asm);
+	dl->asm = NULL;
 }
 
 Listing listing;
 
 Listing *newListing(void) {
 	Listing *l = (Listing *)malloc(sizeof(Listing));
-	l->lines = NULL;
-	l->nlines = 0;
+	l->lines = (DisLine*)malloc(sizeof(DisLine) * 128);
+	l->nlines = 128;
 	l->usedlines = 0;
+	memset(l->lines, 0, sizeof(DisLine)*128);
 	return l;
 }
 
 void clearListing(Listing *listing) {
 	for(int i=0; i<listing->usedlines;i++) {
-		freeDisLine(listing->lines[i]);
-		listing->lines[i] = NULL;
+		freeDisLine(listing->lines+i);
 	}
 	listing->usedlines = 0;
 }
@@ -42,27 +46,30 @@ void clearListing(Listing *listing) {
 void initListing(Listing *l) {
 	if (listing.lines != NULL) {
 		clearListing(l);
+		return;
 	}
-	listing.lines = (DisLine **)malloc(sizeof(DisLine*) * 512);
-	listing.nlines = 512;
-	listing.lines[0] = 0;
+	*l = *newListing();
 }
 
-void addDisLine(Listing *l, DisLine *dl) {
+void addDisLine(Listing *l, char *asm, int addr) {
 	if (l->usedlines + 1 >= l->nlines) {
+			l->lines = (DisLine *)realloc(listing.lines, sizeof(DisLine) * l->nlines * 2);
+			for(int i=l->nlines; i < l->nlines * 2; i++)
+				l->lines[i].asm = 0;
 			l->nlines *= 2;
-			l->lines = (DisLine **)realloc(listing.lines, sizeof(DisLine*) * l->nlines);
 	}
-	l->lines[l->usedlines] = dl;
+	if (l->lines[l->usedlines].asm) free(l->lines[l->usedlines].asm);
+	l->lines[l->usedlines].asm = strdup(asm);
+	l->lines[l->usedlines].addr = addr;
 	l->usedlines++;
 }
 	
 
 void gBufprintf(char *s, ...) {
 	if (listing.lines == NULL) {
-		listing.lines = (DisLine **)malloc(sizeof(DisLine*) * 512);
+		listing.lines = (DisLine *)malloc(sizeof(DisLine) * 512);
 		listing.nlines = 512;
-		listing.lines[0] = 0;
+		listing.usedlines = 0;
 	}
 	static char tmpline[512];
 	char *line;
@@ -72,10 +79,7 @@ void gBufprintf(char *s, ...) {
 	va_end (args);
 	strcat(tmpline, line);
 	if (strchr(line, '\n') != NULL) {
-		DisLine *dl = (DisLine *)malloc(sizeof(DisLine));
-		dl->asm = strdup(tmpline);
-		dl->addr = 0;
-		addDisLine(&listing, dl);
+		addDisLine(&listing, tmpline, address);
 		tmpline[0] = 0;
 	}
 }
@@ -119,9 +123,6 @@ const struct OpcodeDetails optab[88] = {
 	{0xF100,0x5100}, {0xF130,0x9100}, {0xFFF8,0x4840}, {0xFFC0,0x4AC0},
 	{0xFFF0,0x4E40}, {0xFFFF,0x4E76}, {0xFF00,0x4A00}, {0xFFF8,0x4E58}
 };
-
-uint32_t address, romstart;
-bool rawmode = false;
 
 struct MapEntry {
 	uint32_t start;
@@ -225,8 +226,6 @@ bool readmap(const char *filename) {
 	return true;
 }
 
-Buffer *gBuf;
-
 int endofgBuf(Buffer *gBuf) {
 	return gBuf->curptr >= gBuf->bytes+gBuf->len;
 }
@@ -263,7 +262,7 @@ int getword(Buffer *gBuf) {
 
 	address += 2;
 	if (!rawmode) {
-		gBufprintf("%04x ", word);
+//		gBufprintf("%04x ", word);
 	}
 	return word;
 }
@@ -274,7 +273,7 @@ int getword(Buffer *gBuf) {
 	@param mode 0 to 12, indicating addressing mode.
 	@param size 0 = byte, 1 = word, 2 = long.
 */
-void sprintmode(unsigned int mode, unsigned int reg, unsigned int size, char *out_s) {
+void sprintmode(Buffer *gBuf, Labels *lbls, unsigned int mode, unsigned int reg, unsigned int size, char *out_s, int *absaddr) {
 	const char ir[2] = {'W','L'}; /* for mode 6 */
 
 	switch(mode) {
@@ -291,11 +290,17 @@ void sprintmode(unsigned int mode, unsigned int reg, unsigned int size, char *ou
 				sprintf(out_s, "%+i(A%i)", displacement, reg);
 			} else {
 				const uint32_t ldata = address - 2 + displacement;
+				char label[MAXLABELLEN+2];
+				int pos;
+				if ((pos = findLabelByAddr(lbls, ldata)) != -1) {
+					sprintf(label, "<%s>", lbls->labels[pos].name);
+				} else label[0] = 0;
 				if (!rawmode) {
-					sprintf(out_s, "%+i(PC) {$%08x}", displacement, ldata);
+					sprintf(out_s, "%+i(PC) {$%08x%s}", displacement, ldata, label);
 				} else {
 					sprintf(out_s, "%+i(PC)", displacement);
 				}
+				*absaddr = ldata;
 			}
 		} break;
 		case 6  : /* Areg with index + disp */
@@ -323,24 +328,30 @@ void sprintmode(unsigned int mode, unsigned int reg, unsigned int size, char *ou
 				}
 			}
 		} break;
-		case 7  :
-			sprintf(out_s, "$0000%04x", getword(gBuf));
-			break;
+		case 7  : {
+			const int data1 = getword(gBuf);
+			sprintf(out_s, "$0000%04x", data1);
+			*absaddr = data1;
+		}	break;
 		case 8  : {
 			const int data1 = getword(gBuf);
 			const int data2 = getword(gBuf);
 			sprintf(out_s, "$%04x%04x", data1, data2);
+			*absaddr = (data1<<16) | data2;
 		} break;
 		case 11 : {
 			const int data1 = getword(gBuf);
 			switch(size) {
 				case 0 : sprintf(out_s, "#$%02x", (data1 & 0x00FF));
+					*absaddr = data1 & 0x00FF;
 					break;
 				case 1 : sprintf(out_s, "#$%04x", data1);
+					*absaddr = data1;
 					break;
 				case 2 : {
 					const int data2 = getword(gBuf);
 					sprintf(out_s, "#$%04x%04x", data1, data2);
+					*absaddr = (data1<<16) | data2;
 				} break;
 			}
 		} break;
@@ -369,34 +380,49 @@ int getmode(int instruction) {
 	return mode;
 }
 
-void disasm(unsigned long int start, unsigned long int end, Labels *labels) {
+void disasm(Buffer *gBuf, unsigned long int start, unsigned long int end, Labels *labels, IList *output, int justone) {
 	address = start;
+	gBuf->curptr = gBuf->bytes+start;
+	//resetBuffer(gBuf);
 	if (address < romstart) {
 		gBufprintf("Address < RomStart in disasm()!\n");
 		exit(1);
 	}
-
+	int absaddr;
 	while (!endofgBuf(gBuf) && (address < end)) {
 		if (!rawmode) {
-			gBufprintf("%08x : ", address);
+			int pos;
+			char label[MAXLABELLEN+1];
+			if ((pos = findLabelByAddr(labels, address)) != -1) {
+				sprintf(label, "<%s>", labels->labels[pos].name);
+			} else {
+				label[0] = ' '; 
+				label[1] = 0;
+			}
+			gBufprintf("%08x%s: ", address, label);
 		} else {
 			gBufprintf("        ");
 		}
-		const uint32_t start_address = address;
+		Instruction instr;
+		memset(&instr, 0, sizeof(instr));
+		instr.address = address;
+//		const uint32_t start_address = address;
 		const int word = getword(gBuf);
 		bool decoded = false;
-
 		char opcode_s[50], operand_s[101];
 		for (int opnum = 1; opnum <= 87; ++opnum) {
 			if ((word & optab[opnum].and) == optab[opnum].xor) {
 				/* Diagnostic code */
-				diagnostic_gBufprintf("(%i) ",opnum);
+				diagnostic_gBufprintf("(%i) ",opnum); 
 
 				switch(opnum) { /* opnum = 1..85 */
 					case 1  :
 					case 74 : { /* ABCD + SBCD */
 						const int sreg = word & 0x0007;
 						const int dreg = (word & 0x0E00) >> 9;
+						instr.opnum = opnum;
+						instr.soperand = sreg;
+						instr.doperand = dreg;
 						if (opnum == 1) {
 							sprintf(opcode_s, "ABCD");
 						} else {
@@ -404,9 +430,12 @@ void disasm(unsigned long int start, unsigned long int end, Labels *labels) {
 						}
 						if ((word & 0x0008) == 0) {
 							/* reg-reg */
+							instr.src = instr.dst = DATA_REG;
 							sprintf(operand_s, "D%i,D%i", sreg, dreg);
 						} else {
 							/* mem-mem */
+							instr.src = instr.dst = ADDR_REG;
+							instr.prepost = PREDECR;
 							sprintf(operand_s, "-(A%i),-(A%i)", sreg, dreg);
 						}
 						decoded = true;
@@ -449,7 +478,7 @@ void disasm(unsigned long int start, unsigned long int end, Labels *labels) {
 						}
 
 						char dest_s[50];
-						sprintmode(dmode, dreg, size, dest_s);
+						sprintmode(gBuf, labels, dmode, dreg, size, dest_s, &absaddr);
 
 						const int sreg = (word & 0x0E00) >> 9;
 						char source_s[50];
@@ -475,7 +504,7 @@ void disasm(unsigned long int start, unsigned long int end, Labels *labels) {
 								break;
 						}
 						char source_s[50];
-						sprintmode(smode, sreg, size, source_s);
+						sprintmode(gBuf, labels, smode, sreg, size, source_s, &absaddr);
 						sprintf(operand_s, "%s,A%i", source_s, sreg);
 						decoded = true;
 					} break;
@@ -527,7 +556,7 @@ void disasm(unsigned long int start, unsigned long int end, Labels *labels) {
 						if (dmode == 11) {
 							sprintf(dest_s, "SR");
 						} else {
-							sprintmode(dmode, dreg, size, dest_s);
+							sprintmode(gBuf, labels, dmode, dreg, size, dest_s, &absaddr);
 						}
 						sprintf(operand_s, "%s,%s", source_s, dest_s);
 						decoded = true;
@@ -548,7 +577,7 @@ void disasm(unsigned long int start, unsigned long int end, Labels *labels) {
 							sprintf(opcode_s,"SUBQ.%c",size_arr[size]);
 						}
 						char dest_s[50];
-						sprintmode(dmode, dreg, size, dest_s);
+						sprintmode(gBuf, labels, dmode, dreg, size, dest_s, &absaddr);
 						const int count = (word & 0x0E00) >> 9;
 						sprintf(operand_s, "#%i,%s", count ? count : 8, dest_s);
 						decoded = true;
@@ -650,7 +679,7 @@ void disasm(unsigned long int start, unsigned long int end, Labels *labels) {
 							case 70 : sprintf(opcode_s,"ROXR");
 								break;
 						}
-						sprintmode(dmode, dreg, 0, operand_s);
+						sprintmode(gBuf, labels, dmode, dreg, 0, operand_s, &absaddr);
 						decoded = true;
 					} break;
 					case 13 : {/* Bcc */
@@ -661,10 +690,12 @@ void disasm(unsigned long int start, unsigned long int end, Labels *labels) {
 						if (offset != 0) {
 							if (offset >= 128) offset -= 256;
 							if (!rawmode) {
-								int label = searchLabelsByAddr(labels, address+offset);
+								int label = findLabelByAddr(labels, address+offset);
 								char buf[128];
-								sprintf(buf, "(%s)", labels->labels[label].name);
-								sprintf(operand_s, "$%08x%s", address + offset, (labels->labels[label].addr == address + offset)?buf:"");
+								if (label != -1) sprintf(buf, "(%s)", labels->labels[label].name);
+								else buf[0] = 0;
+								sprintf(operand_s, "$%08x%s", address + offset, buf);
+								instr.targetAddress = address + offset;
 							} else {
 								sprintf(operand_s, "*%+d", offset);
 							}
@@ -672,14 +703,17 @@ void disasm(unsigned long int start, unsigned long int end, Labels *labels) {
 							offset = getword(gBuf);
 							if (offset >= 32768l) offset -= 65536l;
 							if (!rawmode) {
-								int label = searchLabelsByAddr(labels, address+offset);
+								int label = findLabelByAddr(labels, address - 2 + offset);
 								char buf[128];
-								sprintf(buf, "(%s)", labels->labels[label].name);
-								sprintf(operand_s, "$%08x%s" , address - 2 + offset, (labels->labels[label].addr == address + offset)?buf:"");
+								if (label != -1) sprintf(buf, "<%s>", labels->labels[label].name);
+								else buf[0] = 0;
+								sprintf(operand_s, "$%08x%s" , address - 2 + offset, buf);
+								instr.targetAddress = address - 2 + offset;
 							} else {
 								sprintf(operand_s, "*%+d", offset);
 							}
 						}
+						instr.isBranch = 1;
 						decoded = true;
 					} break;
 					case 14 :
@@ -738,7 +772,7 @@ void disasm(unsigned long int start, unsigned long int end, Labels *labels) {
 							} break;
 						}
 						char dest_s[50];
-						sprintmode(dmode, dreg, 0, dest_s);
+						sprintmode(gBuf, labels, dmode, dreg, 0, dest_s, &absaddr);
 						sprintf(operand_s, "%s,%s", source_s, dest_s);
 						decoded = true;
 					} break;
@@ -784,7 +818,7 @@ void disasm(unsigned long int start, unsigned long int end, Labels *labels) {
 								break;
 						}
 						char source_s[50];
-						sprintmode(smode, sreg, size, source_s);
+						sprintmode(gBuf, labels, smode, sreg, size, source_s, &absaddr);
 						sprintf(operand_s, "%s,D%i", source_s, dreg);
 						decoded = true;
 					} break;
@@ -797,7 +831,7 @@ void disasm(unsigned long int start, unsigned long int end, Labels *labels) {
 						if (size == 3) break;
 
 						sprintf(opcode_s, "CLR.%c", size_arr[size]);
-						sprintmode(dmode, dreg, size, operand_s);
+						sprintmode(gBuf, labels, dmode, dreg, size, operand_s, &absaddr);
 						decoded = true;
 					} break;
 					case 25 : {/* CMPA */
@@ -808,7 +842,7 @@ void disasm(unsigned long int start, unsigned long int end, Labels *labels) {
 
 						sprintf(opcode_s, "CMPA.%c", size_arr[size]);
 						char source_s[50];
-						sprintmode(smode, sreg, size, source_s);
+						sprintmode(gBuf, labels, smode, sreg, size, source_s, &absaddr);
 						sprintf(operand_s, "%s,A%i", source_s, areg);
 						decoded = true;
 					} break;
@@ -822,6 +856,8 @@ void disasm(unsigned long int start, unsigned long int end, Labels *labels) {
 						if (offset >= 32768) offset -= 65536;
 						const int dreg = word & 0x0007;
 						sprintf(operand_s, "D%i,$%08x", dreg, address - 2 + offset);
+						instr.isBranch = 1;
+						instr.targetAddress = address - 2 + offset;
 						decoded = true;
 					} break;
 					case 33 : { /* EXG */
@@ -863,12 +899,15 @@ void disasm(unsigned long int start, unsigned long int end, Labels *labels) {
 
 						switch(opnum) {
 							case 35 : sprintf(opcode_s, "JMP");
+								instr.isJump = 1;
 								break;
 							case 36 : sprintf(opcode_s, "JSR");
+								instr.isBranch = 1;
 								break;
 						}
 
-						sprintmode(dmode, dreg, 0, operand_s);
+						sprintmode(gBuf, labels, dmode, dreg, 0, operand_s, &absaddr);
+						instr.targetAddress = absaddr;
 						decoded = true;
 					} break;
 					case 37 : {/* LEA */
@@ -880,7 +919,7 @@ void disasm(unsigned long int start, unsigned long int end, Labels *labels) {
 						const int sreg = word & 0x0007;
 						sprintf(opcode_s, "LEA");
 						char source_s[50];
-						sprintmode(smode, sreg, 0, source_s);
+						sprintmode(gBuf, labels, smode, sreg, 0, source_s, &absaddr);
 
 						const int dreg = (word & 0x0E00) >> 9;
 						sprintf(operand_s, "%s,A%i", source_s, dreg);
@@ -932,8 +971,8 @@ void disasm(unsigned long int start, unsigned long int end, Labels *labels) {
 						sprintf(opcode_s,"MOVE.%c",size_arr[size]);
 
 						char source_s[50], dest_s[50];
-						sprintmode(smode, sreg, size, source_s);
-						sprintmode(dmode, dreg, size, dest_s);
+						sprintmode(gBuf, labels, smode, sreg, size, source_s, &absaddr);
+						sprintmode(gBuf, labels, dmode, dreg, size, dest_s, &absaddr);
 						sprintf(operand_s, "%s,%s ", source_s, dest_s);
 						decoded = true;
 					} break;
@@ -948,7 +987,7 @@ void disasm(unsigned long int start, unsigned long int end, Labels *labels) {
 
 						sprintf(opcode_s, "MOVE.W");
 						char source_s[50];
-						sprintmode(smode, sreg, size, source_s);
+						sprintmode(gBuf, labels, smode, sreg, size, source_s, &absaddr);
 						if (opnum == 44) {
 							sprintf(operand_s, "%s,CCR", source_s);
 						} else {
@@ -966,7 +1005,7 @@ void disasm(unsigned long int start, unsigned long int end, Labels *labels) {
 
 						sprintf(opcode_s, "MOVE.W");
 						char dest_s[50];
-						sprintmode(dmode, dreg, size, dest_s);
+						sprintmode(gBuf, labels, dmode, dreg, size, dest_s, &absaddr);
 						sprintf(operand_s, "SR,%s", dest_s);
 						decoded = true;
 					} break;
@@ -997,7 +1036,7 @@ void disasm(unsigned long int start, unsigned long int end, Labels *labels) {
 						sprintf(opcode_s, "MOVEA.%c", size_arr[size]);
 
 						char source_s[50];
-						sprintmode(smode, sreg, size, source_s);
+						sprintmode(gBuf, labels, smode, sreg, size, source_s, &absaddr);
 						sprintf(operand_s, "%s,A%i", source_s, dreg);
 						decoded = true;
 					} break;
@@ -1089,7 +1128,7 @@ void disasm(unsigned long int start, unsigned long int end, Labels *labels) {
 						}
 
 						sprintf(opcode_s, "MOVEM.%c", size_arr[size]);
-						sprintmode(dmode, dreg, size, dest_s);
+						sprintmode(gBuf, labels, dmode, dreg, size, dest_s, &absaddr);
 						if (dir == 0) {
 							/* the comma comes from the reglist */
 							sprintf(operand_s, "%s%s", source_s, dest_s);
@@ -1146,7 +1185,7 @@ void disasm(unsigned long int start, unsigned long int end, Labels *labels) {
 							case 58 : sprintf(opcode_s, "NOT.%c", size_arr[size]);
 								break;
 						}
-						sprintmode(dmode, dreg, size, operand_s);
+						sprintmode(gBuf, labels, dmode, dreg, size, operand_s, &absaddr);
 						decoded = true;
 					} break;
 					case 57 :
@@ -1189,7 +1228,7 @@ void disasm(unsigned long int start, unsigned long int end, Labels *labels) {
 
 						sprintf(opcode_s, "PEA");
 						const int sreg = word & 0x0007;
-						sprintmode(smode, sreg, 0, operand_s);
+						sprintmode(gBuf, labels, smode, sreg, 0, operand_s, &absaddr);
 						decoded = true;
 					} break;
 					case 75 : {/* Scc */
@@ -1202,7 +1241,7 @@ void disasm(unsigned long int start, unsigned long int end, Labels *labels) {
 
 						sprintf(opcode_s, "%s", scc_tab[cc]);
 						char dest_s[50];
-						sprintmode(dmode, dreg, 0, dest_s);
+						sprintmode(gBuf, labels, dmode, dreg, 0, dest_s, &absaddr);
 						sprintf(operand_s, "%s", dest_s);
 						decoded = true;
 					} break;
@@ -1219,7 +1258,7 @@ void disasm(unsigned long int start, unsigned long int end, Labels *labels) {
 						if (dmode >= 9) break;
 
 						sprintf(opcode_s, "TAS ");
-						sprintmode(dmode, dreg, 0, operand_s);
+						sprintmode(gBuf, labels, dmode, dreg, 0, operand_s, &absaddr);
 						decoded = true;
 					} break;
 					case 84 : { /* TRAP */
@@ -1238,7 +1277,7 @@ void disasm(unsigned long int start, unsigned long int end, Labels *labels) {
 						if (size == 3) break;
 
 						sprintf(opcode_s, "TST ");
-						sprintmode(dmode, dreg, size, operand_s);
+						sprintmode(gBuf, labels, dmode, dreg, size, operand_s, &absaddr);
 						decoded = true;
 					} break;
 					case 87 : {/* UNLK */
@@ -1255,17 +1294,34 @@ void disasm(unsigned long int start, unsigned long int end, Labels *labels) {
 			if (decoded) opnum = 88;
 		}
 
-		const int fetched = address - start_address;
-		if (!rawmode) {
-			for (int i = 0 ; i < (5 - fetched); ++i) gBufprintf("     ");
-		}
+//		const int fetched = address - start_address;
+//		if (!rawmode) {
+//			for (int i = 0 ; i < (5 - fetched); ++i) gBufprintf("     ");
+//		}
 		if (decoded != 0) {
+			instr.instr = strdup(opcode_s);
+			if (instr.asm) free(instr.asm);
+			asprintf(&instr.asm, "%-8s %s", opcode_s, operand_s);
+			instr.nbytes = (gBuf->curptr-gBuf->bytes) - instr.address;
 			gBufprintf("%-8s %s\n", opcode_s, operand_s);
+			appendInstruction(output, instr);
 		} else {
 			gBufprintf("???\n");
 		}
+		if (justone)
+			return;
 	}
 }
+
+int disasmone(Buffer *gBuf, int start, Instruction *retval) {
+	Instruction inst[2];
+	IList output = {.instrs = inst, .len=0, .cap=2}; // Should never realloc.
+	Labels labels = {.labels = 0, .len=0, .cap=0};
+	disasm(gBuf, start, gBuf->len, &labels, &output, 1);
+	*retval = inst[0];
+	return (output.len > 0) && strchr(inst[0].asm, '?') == NULL;
+}
+
 
 /*!
 	Consumes end - start input bytes and outputs them as a data segment;
@@ -1274,7 +1330,7 @@ void disasm(unsigned long int start, unsigned long int end, Labels *labels) {
 	Any bytes that are within the printable character range are output as
 	those characters; full stops fill in for unprintable characters.
 */
-void datadump(uint32_t start, uint32_t end) {
+void datadump(Buffer *gBuf, uint32_t start, uint32_t end) {
 	address = start;
 	if (address < romstart) {
 		fprintf(stderr, "Address < RomStart in datadump()!\n");
@@ -1282,9 +1338,9 @@ void datadump(uint32_t start, uint32_t end) {
 	}
 
 	while (!endofgBuf(gBuf) && (address < end)) {
-		DisLine *dl = (DisLine *)malloc(sizeof(DisLine));
-		dl->asm = malloc(128);
-		dl->addr = address;
+		char asm[128];
+		asm[0] = 0;
+		int addr = address;
 		//gBufprintf("%08x : ", address);
 
 		const uint32_t reamaining_bytes = end - address;
@@ -1293,50 +1349,46 @@ void datadump(uint32_t start, uint32_t end) {
 		int toprint[16] ;
 		for (int i = 0; i < 16; ++i) {
 			if (i >= bytes_to_print)
-				strcat(dl->asm, "   ");
+				strcat(asm, "   ");
 			else
 				toprint[i] = getbyte(gBuf);
 		}
-		strcat(dl->asm, "  ");
+		strcat(asm, "  ");
 		for (int i = 0; i < 16; ++i) {
 			const int byte = toprint[i];
 			if (i >= bytes_to_print)
-				strcat(dl->asm, " ");
+				strcat(asm, " ");
 			else if (isprint(byte)) {
 				char s[2];
 				s[0] = byte; s[1] = 0;
-				strcat(dl->asm, s);
+				strcat(asm, s);
 			} else
-				strcat(dl->asm, ".");
+				strcat(asm, ".");
 		}
-		strcat(dl->asm,"\n");
-		addDisLine(&listing, dl);
+		strcat(asm,"\n");
+		addDisLine(&listing, asm, addr);
 	}
 }
 
-int rundis(char *mapfilename, Labels *labels) {
+int rundis(Buffer *bin, char *mapfilename, Labels *labels, IList *instrs) {
 
 	if (!readmap(mapfilename)) {
 		return EXIT_FAILURE;
 	}
-
+	clearListing(&listing);
 	size_t index = 0;
 	while (map[index].type != End) {
-		gBufprintf(index ? "\n" : "");
-		if (map[index].type == Data) datadump(map[index].start, map[index].end);
-		if (map[index].type == Code) disasm(map[index].start, map[index].end, labels);
+		if (map[index].type == Data) datadump(bin, map[index].start, map[index].end);
+		if (map[index].type == Code) disasm(bin, map[index].start, map[index].end, labels, instrs, 0);
 		++ index;
 	}
 	return 0;
 }
 
 
-void loadanddis(Buffer *b, Labels *labels) {
+void loadanddis(Buffer *bin, Labels *labels, IList *instrs) {
 	char *mapfilename = "mapfile";
-
-	extern int readall(FILE *, unsigned char **, size_t *);
-
-	gBuf = b;
-	rundis(mapfilename, labels);
+	listing = *newListing();
+	rundis(bin, mapfilename, labels, instrs);
 }
 

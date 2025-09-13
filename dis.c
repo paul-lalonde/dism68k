@@ -9,6 +9,8 @@
 #define ROWWIDTH 16 // Hex displays 16 bytes per row.  Suck it.
 #define ROWPREFIX 10
 
+int hexwidth;
+
 /* Size of each input chunk to be
    read and allocate for. */
 #ifndef  READALL_CHUNK
@@ -176,9 +178,37 @@ void stylebyte(int pos, int on, int attr) {
 
 void blink(int pos, int on) {
 	stylebyte(pos, on, A_BLINK);
+	stylebyte(pos+1, on, A_BLINK);
 }
 void hexstandout(int pos, int on) {
 	stylebyte(pos, on, A_STANDOUT);
+	stylebyte(pos+1, on, A_STANDOUT);
+}
+
+WINDOW *newdisplaypad(Buffer *bin, int *blocks, int nblocks, Labels *labels) {
+	WINDOW *dispad = newpad(1000, 80);
+	int count = 0;
+	IList *instrs = newIList(128);
+	for (int i = 0; i < 2 * nblocks; i += 2) {
+		disasm(bin, blocks[i], blocks[i+1], labels, instrs, 0);
+		for (int j = 0; j < instrs->len; j++) {
+			char addrstr[128];
+			int l;
+			if ((l = findLabelByAddr(labels, instrs->instrs[j].address)) != -1) {
+				sprintf(addrstr, "%08x %s:", instrs->instrs[j].address, labels->labels[l].name);
+			} else {
+				sprintf(addrstr, "%08x :", instrs->instrs[j].address);
+			}
+
+			wprintw(dispad, "%s: %s\n", addrstr, instrs->instrs[j].asm);
+			if (++count > 1000) goto done;
+		}
+		clearIList(instrs);
+		// There might be a data block here.
+	}
+	done:
+	freeIList(instrs);
+	return dispad;
 }
 
 int exec(char *s) {
@@ -189,7 +219,7 @@ int exec(char *s) {
 
 	switch(s[0]) {
 	case 'n':
-		addLabel(state.labels, s+1, state.offset);
+		addLabel(state.labels, s+1, state.offset, 0);
 		break;
 	case 'p':
 		if (s[1] == 0) {
@@ -197,7 +227,8 @@ int exec(char *s) {
 		}
 		FILE *fp = fopen(s+1, "w");
 		for(int i=0; i < state.labels->len; i++) {
-			fprintf(fp,"%0x %s\n", state.labels->labels[i].addr, state.labels->labels[i].name);
+			if (!state.labels->labels[i].generated)
+				fprintf(fp,"%0x %s\n", state.labels->labels[i].addr, state.labels->labels[i].name);
 		}
 		fclose(fp);
 		break;
@@ -250,7 +281,7 @@ void markasdata(int begin, int end) {
 	Unimplemented("markasdata");
 }
 
-void interact(Buffer *buf, Labels *labels) {
+void interact(Buffer *buf, Labels *labels, int *blocks, int nblocks) {
 	state.buf = buf;
 	state.labels = labels;
 	noecho();
@@ -261,8 +292,8 @@ void interact(Buffer *buf, Labels *labels) {
 	refresh();
 
 	// 01234567: 0123 4567  0123 4567  0123 4567  0123 4567 
-	int hexwidth = 8 + 2 + 4 * 11;
-//	int diswidth = COLS - hexwidth;
+	hexwidth = 8 + 2 + 4 * 11;
+//	diswidth = COLS - hexwidth;
 	hex = newwin(LINES-1, hexwidth, 0, 0);
 	box(hex,0,0);
 //	dis = newwin(LINES-1, diswidth, 0, hexwidth);
@@ -349,8 +380,19 @@ void interact(Buffer *buf, Labels *labels) {
 					state.datamode = 1;
 				}
 				break;
-		case 'D': // Disassemble starting here
+		case 'D': // Disassemble starting here, for length
+	/*
+				if (!hascount) repeats = 0x400; // 1kb default
+				listing.usedlines = 0;
+				if (instrs) clearIList(instrs);
+				else instrs = newIList(0x400);
+				disasm(buf, state.offset, state.offset+repeats, labels, instrs, 0);
+				delwin(dispad);
+				dispad = newdisplaypad(buf, blocks, nblocks, labels);
+				prefresh(dispad, 0, 0, 0, hexwidth, LINES-1, COLS-1);
+*/
 				Unimplemented("Disassemble");
+
 				break;
 		case '/': // Search
 				Unimplemented("Search");
@@ -361,7 +403,7 @@ void interact(Buffer *buf, Labels *labels) {
 				nodelay(cmd, FALSE);
 				echo();
 				mvwaddch(cmd, 0,0, ':');
-				mvwgetnstr(cmd, 0,2, buf, 128);
+				mvwgetnstr(cmd, 0,1, buf, 128);
 				noecho();
 				if (exec(buf)) return;
 				Message("Command: %s", buf);
@@ -370,7 +412,7 @@ void interact(Buffer *buf, Labels *labels) {
 
 		case 'h':
 				oldoffset = state.offset;
-				state.offset-=repeats;
+				state.offset-=2*repeats;
 				if (state.offset < 0) state.offset = 0;
 				hexmoveselection(oldoffset, state.offset);
 				break;
@@ -388,7 +430,7 @@ void interact(Buffer *buf, Labels *labels) {
 				break;
 		case 'l':
 				oldoffset = state.offset;
-				state.offset+=repeats;
+				state.offset+= 2*repeats;
 				if (state.offset > state.buf->len) state.offset = state.buf->len;
 				hexmoveselection(oldoffset, state.offset);
 				break;
@@ -412,6 +454,18 @@ void interact(Buffer *buf, Labels *labels) {
 
 }
 
+// Only generate labels if there isn't already a label for that address.
+// Add them as auto-generated so they don't get saved and restored.
+void generateLabels(Labels *l, int *blocks, int nblocks) {
+	for(int i = 0; i < 2*nblocks; i+=2) {
+		if (findLabelByAddr(l, blocks[i]) == -1) {
+			char buf[128];
+			sprintf(buf, "L%0x", blocks[i]);
+			addLabel(l, buf, blocks[i], 1);
+		}
+	}
+}
+
 int main(void)
 {	// yes, we need command line parsing now.
 
@@ -431,20 +485,26 @@ int main(void)
 	readall(fp, &buf.bytes, &buf.len);
 	fclose(fp);
 
-	loadanddis(&buf, labels);
+	// Calculate basic blocks
+	int *blocks, nblocks, *invalid, ninvalid;
+	findBasicBlocks(&buf, &blocks, &nblocks, &invalid, &ninvalid);
+
+	generateLabels(labels, blocks, nblocks);
+	
+
+	IList *instrs = newIList(0x400);
+	loadanddis(&buf, labels, instrs);
 
 	initscr();			/* Start curses mode 		  */
 	cbreak();
 	nonl(); intrflush(stdscr, FALSE); keypad(stdscr, TRUE);
 
 	// Prep the pad for disassembly
-	dispad = newpad(listing.usedlines, 80);
-	for(int i=0; i < listing.usedlines; i++) {
-		wprintw(dispad, "%s", listing.lines[i]->asm);
-	}
+	dispad = newdisplaypad(&buf, blocks, nblocks, labels);
+
 
 	buf.curptr = buf.bytes;
-	interact(&buf, labels);
+	interact(&buf, labels, blocks, nblocks);
 
 	endwin();			/* End curses mode		  */
 	return 0;
