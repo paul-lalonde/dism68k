@@ -185,12 +185,15 @@ void hexstandout(int pos, int on) {
 	stylebyte(pos+1, on, A_STANDOUT);
 }
 
+extern Listing *newListing(void);
+
 WINDOW *newdisplaypad(Buffer *bin, int *blocks, int nblocks, Labels *labels) {
 	WINDOW *dispad = newpad(1000, 80);
 	int count = 0;
 	IList *instrs = newIList(128);
+	Listing *listing = newListing();
 	for (int i = 0; i < 2 * nblocks; i += 2) {
-		disasm(bin, blocks[i], blocks[i+1], labels, instrs, 0);
+		disasm(bin, blocks[i], blocks[i+1], listing, labels, instrs, 0);
 		for (int j = 0; j < instrs->len; j++) {
 			char addrstr[128];
 			int l;
@@ -470,9 +473,12 @@ int main(void)
 {	// yes, we need command line parsing now.
 
 	Labels *labels = newLabels(128);
+	state.labels = labels;
 	FILE *fp = fopen("labels.txt", "r");
-	freadLabels(fp, labels);
-	fclose(fp);
+	if (fp != NULL) {
+		freadLabels(fp, labels);
+		fclose(fp);
+	}
 
 	// Read our file
 	fp = fopen("W2SYS.BIN", "r");

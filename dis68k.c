@@ -25,26 +25,24 @@ void freeDisLine(DisLine *dl) {
 	dl->asm = NULL;
 }
 
-Listing listing;
-
 Listing *newListing(void) {
 	Listing *l = (Listing *)malloc(sizeof(Listing));
 	l->lines = (DisLine*)malloc(sizeof(DisLine) * 128);
-	l->nlines = 128;
-	l->usedlines = 0;
+	l->cap = 128;
+	l->len = 0;
 	memset(l->lines, 0, sizeof(DisLine)*128);
 	return l;
 }
 
 void clearListing(Listing *listing) {
-	for(int i=0; i<listing->usedlines;i++) {
+	for(int i=0; i<listing->len;i++) {
 		freeDisLine(listing->lines+i);
 	}
-	listing->usedlines = 0;
+	listing->len = 0;
 }
 
 void initListing(Listing *l) {
-	if (listing.lines != NULL) {
+	if (l->lines != NULL) {
 		clearListing(l);
 		return;
 	}
@@ -52,24 +50,24 @@ void initListing(Listing *l) {
 }
 
 void addDisLine(Listing *l, char *asm, int addr) {
-	if (l->usedlines + 1 >= l->nlines) {
-			l->lines = (DisLine *)realloc(listing.lines, sizeof(DisLine) * l->nlines * 2);
-			for(int i=l->nlines; i < l->nlines * 2; i++)
+	if (l->len + 1 >= l->cap) {
+			l->lines = (DisLine *)realloc(l->lines, sizeof(DisLine) * l->cap * 2);
+			for(int i=l->cap; i < l->cap * 2; i++)
 				l->lines[i].asm = 0;
-			l->nlines *= 2;
+			l->cap *= 2;
 	}
-	if (l->lines[l->usedlines].asm) free(l->lines[l->usedlines].asm);
-	l->lines[l->usedlines].asm = strdup(asm);
-	l->lines[l->usedlines].addr = addr;
-	l->usedlines++;
+	if (l->lines[l->len].asm) free(l->lines[l->len].asm);
+	l->lines[l->len].asm = strdup(asm);
+	l->lines[l->len].addr = addr;
+	l->len++;
 }
 	
 
-void gBufprintf(char *s, ...) {
-	if (listing.lines == NULL) {
-		listing.lines = (DisLine *)malloc(sizeof(DisLine) * 512);
-		listing.nlines = 512;
-		listing.usedlines = 0;
+void gBufprintf(Listing *listing, char *s, ...) {
+	if (listing->lines == NULL) {
+		listing->lines = (DisLine *)malloc(sizeof(DisLine) * 512);
+		listing->cap = 512;
+		listing->len = 0;
 	}
 	static char tmpline[512];
 	char *line;
@@ -79,7 +77,7 @@ void gBufprintf(char *s, ...) {
 	va_end (args);
 	strcat(tmpline, line);
 	if (strchr(line, '\n') != NULL) {
-		addDisLine(&listing, tmpline, address);
+		addDisLine(listing, tmpline, address);
 		tmpline[0] = 0;
 	}
 }
@@ -380,12 +378,12 @@ int getmode(int instruction) {
 	return mode;
 }
 
-void disasm(Buffer *gBuf, unsigned long int start, unsigned long int end, Labels *labels, IList *output, int justone) {
+void disasm(Buffer *gBuf, unsigned long int start, unsigned long int end, Listing *l, Labels *labels, IList *output, int justone) {
 	address = start;
 	gBuf->curptr = gBuf->bytes+start;
 	//resetBuffer(gBuf);
 	if (address < romstart) {
-		gBufprintf("Address < RomStart in disasm()!\n");
+		gBufprintf(l, "Address < RomStart in disasm()!\n");
 		exit(1);
 	}
 	int absaddr;
@@ -399,9 +397,9 @@ void disasm(Buffer *gBuf, unsigned long int start, unsigned long int end, Labels
 				label[0] = ' '; 
 				label[1] = 0;
 			}
-			gBufprintf("%08x%s: ", address, label);
+			gBufprintf(l, "%08x%s: ", address, label);
 		} else {
-			gBufprintf("        ");
+			gBufprintf(l, "        ");
 		}
 		Instruction instr;
 		memset(&instr, 0, sizeof(instr));
@@ -689,26 +687,26 @@ void disasm(Buffer *gBuf, unsigned long int start, unsigned long int end, Labels
 						int offset = (word & 0x00FF);
 						if (offset != 0) {
 							if (offset >= 128) offset -= 256;
+							instr.targetAddress = address + offset;
 							if (!rawmode) {
 								int label = findLabelByAddr(labels, address+offset);
 								char buf[128];
 								if (label != -1) sprintf(buf, "(%s)", labels->labels[label].name);
 								else buf[0] = 0;
 								sprintf(operand_s, "$%08x%s", address + offset, buf);
-								instr.targetAddress = address + offset;
 							} else {
 								sprintf(operand_s, "*%+d", offset);
 							}
 						} else {
 							offset = getword(gBuf);
 							if (offset >= 32768l) offset -= 65536l;
+							instr.targetAddress = address - 2 + offset;
 							if (!rawmode) {
 								int label = findLabelByAddr(labels, address - 2 + offset);
 								char buf[128];
 								if (label != -1) sprintf(buf, "<%s>", labels->labels[label].name);
 								else buf[0] = 0;
 								sprintf(operand_s, "$%08x%s" , address - 2 + offset, buf);
-								instr.targetAddress = address - 2 + offset;
 							} else {
 								sprintf(operand_s, "*%+d", offset);
 							}
@@ -1287,7 +1285,7 @@ void disasm(Buffer *gBuf, unsigned long int start, unsigned long int end, Labels
 						decoded = true;
 					} break;
 
-					default : gBufprintf("opnum out of range in switch (=%i)\n", opnum);
+					default : gBufprintf(l, "opnum out of range in switch (=%i)\n", opnum);
 						exit(1);
 				}
 			}
@@ -1296,17 +1294,17 @@ void disasm(Buffer *gBuf, unsigned long int start, unsigned long int end, Labels
 
 //		const int fetched = address - start_address;
 //		if (!rawmode) {
-//			for (int i = 0 ; i < (5 - fetched); ++i) gBufprintf("     ");
+//			for (int i = 0 ; i < (5 - fetched); ++i) gBufprintf(l, "     ");
 //		}
 		if (decoded != 0) {
 			instr.instr = strdup(opcode_s);
 			if (instr.asm) free(instr.asm);
 			asprintf(&instr.asm, "%-8s %s", opcode_s, operand_s);
 			instr.nbytes = (gBuf->curptr-gBuf->bytes) - instr.address;
-			gBufprintf("%-8s %s\n", opcode_s, operand_s);
+			gBufprintf(l,"%-8s %s\n", opcode_s, operand_s);
 			appendInstruction(output, instr);
 		} else {
-			gBufprintf("???\n");
+			gBufprintf(l,"???\n");
 		}
 		if (justone)
 			return;
@@ -1316,8 +1314,11 @@ void disasm(Buffer *gBuf, unsigned long int start, unsigned long int end, Labels
 int disasmone(Buffer *gBuf, int start, Instruction *retval) {
 	Instruction inst[2];
 	IList output = {.instrs = inst, .len=0, .cap=2}; // Should never realloc.
+	static Listing *listing;
+	if (listing == NULL) listing=newListing();
+	clearListing(listing);
 	Labels labels = {.labels = 0, .len=0, .cap=0};
-	disasm(gBuf, start, gBuf->len, &labels, &output, 1);
+	disasm(gBuf, start, gBuf->len, listing, &labels, &output, 1);
 	*retval = inst[0];
 	return (output.len > 0) && strchr(inst[0].asm, '?') == NULL;
 }
@@ -1330,7 +1331,7 @@ int disasmone(Buffer *gBuf, int start, Instruction *retval) {
 	Any bytes that are within the printable character range are output as
 	those characters; full stops fill in for unprintable characters.
 */
-void datadump(Buffer *gBuf, uint32_t start, uint32_t end) {
+void datadump(Buffer *gBuf, uint32_t start, uint32_t end, Listing *l) {
 	address = start;
 	if (address < romstart) {
 		fprintf(stderr, "Address < RomStart in datadump()!\n");
@@ -1366,7 +1367,7 @@ void datadump(Buffer *gBuf, uint32_t start, uint32_t end) {
 				strcat(asm, ".");
 		}
 		strcat(asm,"\n");
-		addDisLine(&listing, asm, addr);
+		addDisLine(l, asm, addr);
 	}
 }
 
@@ -1375,11 +1376,13 @@ int rundis(Buffer *bin, char *mapfilename, Labels *labels, IList *instrs) {
 	if (!readmap(mapfilename)) {
 		return EXIT_FAILURE;
 	}
-	clearListing(&listing);
+	static Listing *listing;
+	if (listing == NULL) listing = newListing();
+	clearListing(listing);
 	size_t index = 0;
 	while (map[index].type != End) {
-		if (map[index].type == Data) datadump(bin, map[index].start, map[index].end);
-		if (map[index].type == Code) disasm(bin, map[index].start, map[index].end, labels, instrs, 0);
+		if (map[index].type == Data) datadump(bin, map[index].start, map[index].end, listing);
+		if (map[index].type == Code) disasm(bin, map[index].start, map[index].end, listing, labels, instrs, 0);
 		++ index;
 	}
 	return 0;
@@ -1388,7 +1391,6 @@ int rundis(Buffer *bin, char *mapfilename, Labels *labels, IList *instrs) {
 
 void loadanddis(Buffer *bin, Labels *labels, IList *instrs) {
 	char *mapfilename = "mapfile";
-	listing = *newListing();
 	rundis(bin, mapfilename, labels, instrs);
 }
 

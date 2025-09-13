@@ -121,7 +121,7 @@ void findBasicBlocks(Buffer *bin, int **outarray, int *outarraylen, int **invali
             // 3. We reach end of binary
             if (nextAddr >= bin->len || 
                 (nextAddr < bin->len && isLeader[nextAddr]) ||
-                inst.isBranch || inst.isRet) {
+                inst.isBranch || inst.isJump || inst.isRet) {
                 
                 // Add block
                 if (blockCount * 2 >= blockCapacity) {

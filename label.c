@@ -31,7 +31,8 @@ int findLabelByAddr(Labels *labels, int key) {
 void insertLabel(Labels *ls, int pos, struct Label newvalue)
 {
 	Label *labels = ls->labels;
-	if (labels[pos].addr == newvalue.addr) {
+	
+	if (pos < ls->len && labels[pos].addr == newvalue.addr) {
 		free(labels[pos].name);
 		labels[pos] = newvalue;
 		return;
@@ -41,6 +42,7 @@ void insertLabel(Labels *ls, int pos, struct Label newvalue)
 	if (ls->len + 1 >= ls->cap) {
 		ls->labels = (Label*)realloc(ls->labels, ls->cap * 2);
 		ls->cap = ls->cap * 2;
+		labels = ls->labels;
 	}
 	for (i = ls->len; i > pos; i--)
 		labels[i] = labels[i - 1];
@@ -65,8 +67,8 @@ void addLabel(Labels *ls, char *name, int addr, int generated) {
 
 void freadLabels(FILE *fp, Labels *labels) {
 	size_t nread;
-	char *line;
-	size_t size;
+	char *line = 0;
+	size_t size = 0;
 	while ((nread = getline(&line, &size, fp)) != -1) {
 		line[nread-1] = 0; // Ditch the newline
 		int addr;

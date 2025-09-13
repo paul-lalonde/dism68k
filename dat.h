@@ -20,8 +20,8 @@ struct DisLine {
 
 struct Listing {
 	DisLine *lines;
-	int nlines;
-	int usedlines;
+	int len;
+	int cap;
 };
 
 #define MAXLABELLEN 64
@@ -52,8 +52,6 @@ void addLabel(Labels *ls, char *name, int addr, int generated); // Strdups the n
 void freadLabels(FILE *fp, Labels *);
 int searchLabelsByAddr(Labels *labels, int key); // Return insertion point
 int findLabelByAddr(Labels *labels, int key); // Return -1 if not found
-
-extern Listing listing;
 
 extern void loadmap(char *name);
 
@@ -98,7 +96,7 @@ void freeIList(IList *);
 void clearIList(IList *);
 void appendInstruction(IList *, Instruction);
 
-extern void disasm(Buffer *bin, unsigned long int start, unsigned long int end, Labels *labels, IList *, int justOne);
+extern void disasm(Buffer *bin, unsigned long int start, unsigned long int end, Listing *l, Labels *labels, IList *, int justOne);
 extern int disasmone(Buffer *bin, int start, Instruction *retval);
 extern void loadanddis(Buffer *, Labels *, IList *);
 
