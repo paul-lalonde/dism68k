@@ -23,31 +23,33 @@ int searchLabelsByAddr(Labels *labels, int key) {
 int findLabelByAddr(Labels *labels, int key) {
 	if (labels->len == 0) return -1;
 	int pos = searchLabelsByAddr(labels, key);
-	if (labels->labels[pos].addr != key) return -1;
+	if (pos >= labels->len || labels->labels[pos].addr != key) return -1;
 	return pos;
 }
 
-// Assumes the capacity is already there.  Overwrites a label if it's already there.
 void insertLabel(Labels *ls, int pos, struct Label newvalue)
 {
-	Label *labels = ls->labels;
-	
-	if (pos < ls->len && labels[pos].addr == newvalue.addr) {
-		free(labels[pos].name);
-		labels[pos] = newvalue;
+	// Renaming the existing label.
+	if (pos < ls->len && ls->labels[pos].addr == newvalue.addr) {
+		free(ls->labels[pos].name);
+		ls->labels[pos] = newvalue;
 		return;
 	}
-		
+	
+	// Label ins't a match.  Insert at this position. That means increasing the length by one
 	int i;
-	if (ls->len + 1 >= ls->cap) {
-		ls->labels = (Label*)realloc(ls->labels, ls->cap * 2);
+	if (ls->len == ls->cap) {
 		ls->cap = ls->cap * 2;
-		labels = ls->labels;
+		Label *nl = (Label*)realloc(ls->labels, sizeof(Label) * ls->cap);
+		if (nl == NULL) {
+			printf("WTF\n");
+		}
+		ls->labels = nl;
 	}
 	for (i = ls->len; i > pos; i--)
-		labels[i] = labels[i - 1];
+		ls->labels[i] = ls->labels[i - 1];
 	ls->len++;
-	labels[pos] = newvalue;
+	ls->labels[pos] = newvalue;
 }
 
 Labels *newLabels(int cap) {
@@ -78,7 +80,8 @@ void freadLabels(FILE *fp, Labels *labels) {
          }
 }
 
-IList *newIList(int cap) {
+IList *newIList(void) {
+	const int cap = 1;
 	IList *l = (IList *)malloc(sizeof(IList));
 	l->len = 0;
 	l->cap = cap;
@@ -100,10 +103,10 @@ void freeIList(IList *l) {
 }
 	
 void appendInstruction(IList *l, Instruction instr) {
-	l->instrs[l->len++] = instr;
-	if (l->len >= l->cap) {
+	if (l->len+1 >= l->cap) {
 		l->cap *= 2;
 		l->instrs = (Instruction *)realloc(l->instrs, sizeof(Instruction)*l->cap);
 	}
+	l->instrs[l->len++] = instr;
 }
 

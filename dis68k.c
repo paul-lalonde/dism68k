@@ -17,7 +17,7 @@
 #include <stdarg.h>
 #include "dat.h"
 
-uint32_t address, romstart;
+static uint32_t address, romstart;
 bool rawmode = false;
 
 void freeDisLine(DisLine *dl) {
@@ -25,50 +25,10 @@ void freeDisLine(DisLine *dl) {
 	dl->asm = NULL;
 }
 
-Listing *newListing(void) {
-	Listing *l = (Listing *)malloc(sizeof(Listing));
-	l->lines = (DisLine*)malloc(sizeof(DisLine) * 128);
-	l->cap = 128;
-	l->len = 0;
-	memset(l->lines, 0, sizeof(DisLine)*128);
-	return l;
-}
 
-void clearListing(Listing *listing) {
-	for(int i=0; i<listing->len;i++) {
-		freeDisLine(listing->lines+i);
-	}
-	listing->len = 0;
-}
 
-void initListing(Listing *l) {
-	if (l->lines != NULL) {
-		clearListing(l);
-		return;
-	}
-	*l = *newListing();
-}
-
-void addDisLine(Listing *l, char *asm, int addr) {
-	if (l->len + 1 >= l->cap) {
-			l->lines = (DisLine *)realloc(l->lines, sizeof(DisLine) * l->cap * 2);
-			for(int i=l->cap; i < l->cap * 2; i++)
-				l->lines[i].asm = 0;
-			l->cap *= 2;
-	}
-	if (l->lines[l->len].asm) free(l->lines[l->len].asm);
-	l->lines[l->len].asm = strdup(asm);
-	l->lines[l->len].addr = addr;
-	l->len++;
-}
-	
-
-void gBufprintf(Listing *listing, char *s, ...) {
-	if (listing->lines == NULL) {
-		listing->lines = (DisLine *)malloc(sizeof(DisLine) * 512);
-		listing->cap = 512;
-		listing->len = 0;
-	}
+void gBufprintf(char *s, ...) {
+/*
 	static char tmpline[512];
 	char *line;
 	va_list args;
@@ -80,6 +40,7 @@ void gBufprintf(Listing *listing, char *s, ...) {
 		addDisLine(listing, tmpline, address);
 		tmpline[0] = 0;
 	}
+*/
 }
 
 
@@ -378,12 +339,13 @@ int getmode(int instruction) {
 	return mode;
 }
 
-void disasm(Buffer *gBuf, unsigned long int start, unsigned long int end, Listing *l, Labels *labels, IList *output, int justone) {
+// Return 0 if failed to decode instruction in the justone case
+int disasm(Buffer *gBuf, unsigned long int start, unsigned long int end, Labels *labels, IList *output, int justone) {
 	address = start;
 	gBuf->curptr = gBuf->bytes+start;
 	//resetBuffer(gBuf);
 	if (address < romstart) {
-		gBufprintf(l, "Address < RomStart in disasm()!\n");
+		gBufprintf("Address < RomStart in disasm()!\n");
 		exit(1);
 	}
 	int absaddr;
@@ -397,9 +359,9 @@ void disasm(Buffer *gBuf, unsigned long int start, unsigned long int end, Listin
 				label[0] = ' '; 
 				label[1] = 0;
 			}
-			gBufprintf(l, "%08x%s: ", address, label);
+			gBufprintf("%08x%s ", address, label);
 		} else {
-			gBufprintf(l, "        ");
+			gBufprintf("        ");
 		}
 		Instruction instr;
 		memset(&instr, 0, sizeof(instr));
@@ -903,7 +865,9 @@ void disasm(Buffer *gBuf, unsigned long int start, unsigned long int end, Listin
 								instr.isBranch = 1;
 								break;
 						}
-
+						absaddr = 0; // There are a few JSR (A0) computed jumps.  These need an address
+						// to not mess up the basic block finding too badly.  Clearly, we don't know where 
+						// this goes to until we debug further.  This might miss some basic blocks.
 						sprintmode(gBuf, labels, dmode, dreg, 0, operand_s, &absaddr);
 						instr.targetAddress = absaddr;
 						decoded = true;
@@ -1285,7 +1249,7 @@ void disasm(Buffer *gBuf, unsigned long int start, unsigned long int end, Listin
 						decoded = true;
 					} break;
 
-					default : gBufprintf(l, "opnum out of range in switch (=%i)\n", opnum);
+					default : gBufprintf("opnum out of range in switch (=%i)\n", opnum);
 						exit(1);
 				}
 			}
@@ -1294,33 +1258,35 @@ void disasm(Buffer *gBuf, unsigned long int start, unsigned long int end, Listin
 
 //		const int fetched = address - start_address;
 //		if (!rawmode) {
-//			for (int i = 0 ; i < (5 - fetched); ++i) gBufprintf(l, "     ");
+//			for (int i = 0 ; i < (5 - fetched); ++i) gBufprintf("     ");
 //		}
 		if (decoded != 0) {
+			if (instr.instr) free(instr.instr);
 			instr.instr = strdup(opcode_s);
 			if (instr.asm) free(instr.asm);
 			asprintf(&instr.asm, "%-8s %s", opcode_s, operand_s);
 			instr.nbytes = (gBuf->curptr-gBuf->bytes) - instr.address;
-			gBufprintf(l,"%-8s %s\n", opcode_s, operand_s);
+			gBufprintf("%-8s %s\n", opcode_s, operand_s);
 			appendInstruction(output, instr);
 		} else {
-			gBufprintf(l,"???\n");
+			gBufprintf("???\n");
+			if (justone) return 0;
 		}
 		if (justone)
-			return;
+			return 1;
 	}
+	return 0;
 }
 
 int disasmone(Buffer *gBuf, int start, Instruction *retval) {
 	Instruction inst[2];
 	IList output = {.instrs = inst, .len=0, .cap=2}; // Should never realloc.
-	static Listing *listing;
-	if (listing == NULL) listing=newListing();
-	clearListing(listing);
 	Labels labels = {.labels = 0, .len=0, .cap=0};
-	disasm(gBuf, start, gBuf->len, listing, &labels, &output, 1);
-	*retval = inst[0];
-	return (output.len > 0) && strchr(inst[0].asm, '?') == NULL;
+	if ( disasm(gBuf, start, gBuf->len, &labels, &output, 1) ) {
+		*retval = inst[0];
+		return 1;
+	}
+	return 0;
 }
 
 
@@ -1331,7 +1297,7 @@ int disasmone(Buffer *gBuf, int start, Instruction *retval) {
 	Any bytes that are within the printable character range are output as
 	those characters; full stops fill in for unprintable characters.
 */
-void datadump(Buffer *gBuf, uint32_t start, uint32_t end, Listing *l) {
+void datadump(Buffer *gBuf, uint32_t start, uint32_t end) {
 	address = start;
 	if (address < romstart) {
 		fprintf(stderr, "Address < RomStart in datadump()!\n");
@@ -1341,7 +1307,6 @@ void datadump(Buffer *gBuf, uint32_t start, uint32_t end, Listing *l) {
 	while (!endofgBuf(gBuf) && (address < end)) {
 		char asm[128];
 		asm[0] = 0;
-		int addr = address;
 		//gBufprintf("%08x : ", address);
 
 		const uint32_t reamaining_bytes = end - address;
@@ -1367,7 +1332,6 @@ void datadump(Buffer *gBuf, uint32_t start, uint32_t end, Listing *l) {
 				strcat(asm, ".");
 		}
 		strcat(asm,"\n");
-		addDisLine(l, asm, addr);
 	}
 }
 
@@ -1376,13 +1340,10 @@ int rundis(Buffer *bin, char *mapfilename, Labels *labels, IList *instrs) {
 	if (!readmap(mapfilename)) {
 		return EXIT_FAILURE;
 	}
-	static Listing *listing;
-	if (listing == NULL) listing = newListing();
-	clearListing(listing);
 	size_t index = 0;
 	while (map[index].type != End) {
-		if (map[index].type == Data) datadump(bin, map[index].start, map[index].end, listing);
-		if (map[index].type == Code) disasm(bin, map[index].start, map[index].end, listing, labels, instrs, 0);
+		if (map[index].type == Data) datadump(bin, map[index].start, map[index].end);
+		if (map[index].type == Code) disasm(bin, map[index].start, map[index].end, labels, instrs, 0);
 		++ index;
 	}
 	return 0;

@@ -185,25 +185,24 @@ void hexstandout(int pos, int on) {
 	stylebyte(pos+1, on, A_STANDOUT);
 }
 
-extern Listing *newListing(void);
-
 WINDOW *newdisplaypad(Buffer *bin, int *blocks, int nblocks, Labels *labels) {
 	WINDOW *dispad = newpad(1000, 80);
 	int count = 0;
-	IList *instrs = newIList(128);
-	Listing *listing = newListing();
+	IList *instrs = newIList();
 	for (int i = 0; i < 2 * nblocks; i += 2) {
-		disasm(bin, blocks[i], blocks[i+1], listing, labels, instrs, 0);
+		disasm(bin, blocks[i], blocks[i+1], labels, instrs, 0);
 		for (int j = 0; j < instrs->len; j++) {
-			char addrstr[128];
 			int l;
+			int r, c;
+			getyx(dispad,r,c);
 			if ((l = findLabelByAddr(labels, instrs->instrs[j].address)) != -1) {
-				sprintf(addrstr, "%08x %s:", instrs->instrs[j].address, labels->labels[l].name);
+				wprintw(dispad, "%08x", instrs->instrs[j].address);
+				mvwprintw(dispad, r, 20 - strlen(labels->labels[l].name) - 2 , "%s: ", labels->labels[l].name);
 			} else {
-				sprintf(addrstr, "%08x :", instrs->instrs[j].address);
+				wprintw(dispad, "%08x ", instrs->instrs[j].address);
 			}
 
-			wprintw(dispad, "%s: %s\n", addrstr, instrs->instrs[j].asm);
+			mvwprintw(dispad, r, 20, "%s\n", instrs->instrs[j].asm);
 			if (++count > 1000) goto done;
 		}
 		clearIList(instrs);
@@ -388,7 +387,7 @@ void interact(Buffer *buf, Labels *labels, int *blocks, int nblocks) {
 				if (!hascount) repeats = 0x400; // 1kb default
 				listing.usedlines = 0;
 				if (instrs) clearIList(instrs);
-				else instrs = newIList(0x400);
+				else instrs = newIList();
 				disasm(buf, state.offset, state.offset+repeats, labels, instrs, 0);
 				delwin(dispad);
 				dispad = newdisplaypad(buf, blocks, nblocks, labels);
@@ -463,7 +462,7 @@ void generateLabels(Labels *l, int *blocks, int nblocks) {
 	for(int i = 0; i < 2*nblocks; i+=2) {
 		if (findLabelByAddr(l, blocks[i]) == -1) {
 			char buf[128];
-			sprintf(buf, "L%0x", blocks[i]);
+			sprintf(buf, "L%06x", blocks[i]);
 			addLabel(l, buf, blocks[i], 1);
 		}
 	}
@@ -472,7 +471,7 @@ void generateLabels(Labels *l, int *blocks, int nblocks) {
 int main(void)
 {	// yes, we need command line parsing now.
 
-	Labels *labels = newLabels(128);
+	Labels *labels = newLabels(1);
 	state.labels = labels;
 	FILE *fp = fopen("labels.txt", "r");
 	if (fp != NULL) {
@@ -490,6 +489,7 @@ int main(void)
 
 	readall(fp, &buf.bytes, &buf.len);
 	fclose(fp);
+	buf.curptr = buf.bytes;
 
 	// Calculate basic blocks
 	int *blocks, nblocks, *invalid, ninvalid;
@@ -498,7 +498,7 @@ int main(void)
 	generateLabels(labels, blocks, nblocks);
 	
 
-	IList *instrs = newIList(0x400);
+	IList *instrs = newIList();
 	loadanddis(&buf, labels, instrs);
 
 	initscr();			/* Start curses mode 		  */

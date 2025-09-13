@@ -16,7 +16,7 @@ Avoid using any external libraries.  If you need help with instruction decoding,
 #include <stdbool.h>
 #include "dat.h"
 
-void findBasicBlocks(Buffer *bin, int **outarray, int *outarraylen, int **invalid, int *ninvalid) {
+void findBasicBlocks(Buffer *bin, int **outblocks, int *nblocks, int **invalid, int *ninvalid) {
     int *blocks = NULL;
     int blockCount = 0;
     int blockCapacity = 0;
@@ -73,6 +73,9 @@ void findBasicBlocks(Buffer *bin, int **outarray, int *outarraylen, int **invali
         
         if (inst.isBranch || inst.isJump) {
             // Target of branch is a leader
+//printf("bin->len = %ld\n", bin->len);
+//printf("addr = 0x%0x\n", addr);
+//printf("inst.targetAddress = %x\n", inst.targetAddress);
             if (inst.targetAddress < bin->len) {
                 isLeader[inst.targetAddress] = true;
                 if (!visited[inst.targetAddress]) {
@@ -165,8 +168,8 @@ void findBasicBlocks(Buffer *bin, int **outarray, int *outarraylen, int **invali
     free(stack);
     
     // Return results
-    *outarray = blocks;
-    *outarraylen = blockCount * 2;
+    *outblocks = blocks;
+    *nblocks = blockCount;
     *invalid = invalidAddrs;
     *ninvalid = invalidCount;
 }

@@ -1,6 +1,5 @@
 typedef struct CodeBlock CodeBlock;
 typedef struct DisLine DisLine;
-typedef struct Listing Listing;
 typedef struct Buffer Buffer;
 typedef struct IList IList;
 typedef struct Instruction Instruction;
@@ -16,12 +15,6 @@ struct Buffer {
 struct DisLine {
 	char *asm;
 	int addr;
-};
-
-struct Listing {
-	DisLine *lines;
-	int len;
-	int cap;
 };
 
 #define MAXLABELLEN 64
@@ -91,12 +84,12 @@ struct IList {
 	int cap;
 };
 
-IList *newIList(int cap);
+IList *newIList(void);
 void freeIList(IList *);
 void clearIList(IList *);
 void appendInstruction(IList *, Instruction);
 
-extern void disasm(Buffer *bin, unsigned long int start, unsigned long int end, Listing *l, Labels *labels, IList *, int justOne);
+extern int disasm(Buffer *bin, unsigned long int start, unsigned long int end, Labels *labels, IList *, int justOne);
 extern int disasmone(Buffer *bin, int start, Instruction *retval);
 extern void loadanddis(Buffer *, Labels *, IList *);
 

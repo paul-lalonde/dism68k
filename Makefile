@@ -1,4 +1,4 @@
-CC = clang
+CC = gcc
 CFLAGS = -g -std=c99 -pedantic -Wall
 OBJECTS = dis.o dis68k.o label.o basicblock.o
 
