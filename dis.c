@@ -520,7 +520,7 @@ void interact(Buffer *buf, Labels *labels, BasicBlock *blocks, int nblocks) {
 			}
 		}
 		hexmode = 0;
-		if (hascount == 0 && strchr("hjkl", ch)) 
+		if (hascount == 0 && strchr("hjkl\06\02", ch)) 
 			repeats = 1;
 
 		if (ch == '	') {
@@ -632,7 +632,7 @@ void interact(Buffer *buf, Labels *labels, BasicBlock *blocks, int nblocks) {
 		}
 		} else if (editmode == DISASMEDITOR) {
 		switch(ch) {
-		case 0x07:
+		case 0x07: //^g
 				Message("On line %d\n", state.line);
 				break;
 		case 'r': // refresh
@@ -641,6 +641,9 @@ void interact(Buffer *buf, Labels *labels, BasicBlock *blocks, int nblocks) {
 				wrefresh(diswin);
 				break;
 
+		case 0x06:  //^f
+				repeats *= LINES/2;
+				// fallthrough
 		case 'j':
 				oldline = state.line;
 				state.line+=repeats;
@@ -651,6 +654,9 @@ void interact(Buffer *buf, Labels *labels, BasicBlock *blocks, int nblocks) {
 				state.offset = state.lineAddresses[state.line-state.topline];
 				hexmoveselection(oldoffset, state.offset);
 				break;
+		case 0x02:  //^b
+				repeats *= LINES/2;
+				// fallthrough
 		case 'k':
 				oldline = state.line;
 				state.line-=repeats;
