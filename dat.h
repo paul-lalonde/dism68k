@@ -94,3 +94,4 @@ extern int disasmone(Buffer *bin, int start, Instruction *retval);
 extern void loadanddis(Buffer *, Labels *, IList *);
 
 void findBasicBlocks(Buffer *bin, int **outarray, int *outarraylen, int **invalid, int *ninvalid);
+int findAddr(int addr, int *blocks, int nblocks);

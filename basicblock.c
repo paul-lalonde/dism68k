@@ -16,6 +16,23 @@ Avoid using any external libraries.  If you need help with instruction decoding,
 #include <stdbool.h>
 #include "dat.h"
 
+// returns offset of basic block, counted in pairs.
+int findAddr(int addr, int *blocks, int nblocks) {
+	int l, r, m;
+	
+	l = 0;
+	r = nblocks;
+	
+	while (l < r) {
+		m = l + (r - l) / 2;
+		if (blocks[2*m+1] < addr) // We look at the *end* of the blocks.
+			l = m + 1;
+		else
+			r = m;
+	}
+	return l;
+}
+
 void findBasicBlocks(Buffer *bin, int **outblocks, int *nblocks, int **invalid, int *ninvalid) {
     int *blocks = NULL;
     int blockCount = 0;

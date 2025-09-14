@@ -1,3 +1,4 @@
+#include <assert.h>
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -92,7 +93,7 @@ int readall(FILE *in, unsigned char **dataptr, size_t *sizeptr)
     return READALL_OK;
 }
 
-WINDOW *hex, *dispad, *cmd;
+WINDOW *hex, *diswin, *cmd;
 
 void Message(char *s, ...) {
 	char *buf; 
@@ -141,6 +142,13 @@ typedef struct {
 	int dmstartoffset;
 	Buffer *buf;
 	Labels *labels;
+
+	// DISASM
+	int line;
+	int topline;
+	int bblock; // index of first basic block on our screen.
+	IList *instructions; // Instructions currently in dispad?
+	int *lineAddresses;
 } State;
 
 static State state;
@@ -185,8 +193,41 @@ void hexstandout(int pos, int on) {
 	stylebyte(pos+1, on, A_STANDOUT);
 }
 
+int filldisline(Buffer *bin, int addr, int line, int *blocks, int nblocks, Labels *labels) {
+	// find the basic block containing addr, disassemble it until we get to addr
+	int bb = findAddr(addr, blocks, nblocks);
+	Instruction inst;
+	int l;
+	for(int a = blocks[2*bb]; a < blocks[2*bb+1]; ) {
+		disasmone(bin, a, &inst);
+		if (inst.address == addr) {
+			if ((l = findLabelByAddr(labels, addr)) != -1) {
+				wprintw(diswin, "%08x", addr);
+				mvwprintw(diswin, line, 20 - strlen(labels->labels[l].name) - 2 , "%s: ", labels->labels[l].name);
+			} else {
+				wprintw(diswin, "%08x ", addr);
+			}
+
+			mvwprintw(diswin, line, 20, "%s\n", inst.asm);
+			int nextaddr = addr + inst.nbytes;
+			if (nextaddr > blocks[2*bb+1]) { // Past the end of this block.
+				if (2*(bb+1) < nblocks) {
+					nextaddr = blocks[2*(bb+1)]; // In the next block.
+				} else {
+					nextaddr = -1; // Past the end of basic blocks
+				}
+			}
+			return nextaddr;
+		} else {
+			a += inst.nbytes;
+		}
+	}
+	return -1;
+}
+
+/*
 WINDOW *newdisplaypad(Buffer *bin, int *blocks, int nblocks, Labels *labels) {
-	WINDOW *dispad = newpad(1000, 80);
+	WINDOW *dispad = newpad(bin->len, 80);
 	int count = 0;
 	IList *instrs = newIList();
 	for (int i = 0; i < 2 * nblocks; i += 2) {
@@ -212,6 +253,7 @@ WINDOW *newdisplaypad(Buffer *bin, int *blocks, int nblocks, Labels *labels) {
 	freeIList(instrs);
 	return dispad;
 }
+*/
 
 int exec(char *s) {
 	// This should really be a little language, like ed.
@@ -279,27 +321,91 @@ Message("target pos %0x at (r,c): %d, %d; hy = %d; nlines = %d", pos, r, c, hy, 
 	wrefresh(hex);
 }
 
+void styleline(int line, int on, int attr) {
+	int nrows, ncols;
+	getmaxyx(diswin, nrows, ncols);
+	int r = line - state.topline;
+	for (int c = 0; c < ncols; c++) {
+		chtype ch0 = mvwinch(diswin, r, c);
+		if (on) {
+			mvwaddch(diswin, r, c, ch0 | attr);
+		} else {
+			mvwaddch(diswin, r, c, ch0 & ~attr);
+		}
+	}
+}
+
+// Make sure state->line is both disassembled and on screen.
+void showLine(State *state) {
+	// If it's alread onscreen, do nothing.
+}
+
+int offsetToLine(State *state, int offset) {
+	for(int i = 0; i < LINES-1; i++) {
+		if (state->lineAddresses[i] >= offset) {
+			return i;
+		}
+	}
+	return -1; // offscreen
+}
+
+void dismoveselection(int oldline, int line) {
+	// remove highlight from old line.
+	styleline(oldline, 0, A_STANDOUT);
+
+	// scroll if needed.
+
+	styleline(line, 1, A_STANDOUT);
+
+	wrefresh(diswin);
+}
+
+
 void markasdata(int begin, int end) {
 	Unimplemented("markasdata");
+}
+
+enum EditMode {
+	HEXEDITOR = 0,
+	DISASMEDITOR
+};
+
+void refilldis(Buffer *bin, int addr, int *blocks, int nblocks, Labels *labels) {
+	wclear(diswin);
+	int nextaddr = 0;
+	for(int r=0; r<LINES-1;r++) {
+		state.lineAddresses[r] = nextaddr;
+		nextaddr = filldisline(bin, nextaddr, r, blocks, nblocks, labels);
+		assert(nextaddr != -1);
+	}
 }
 
 void interact(Buffer *buf, Labels *labels, int *blocks, int nblocks) {
 	state.buf = buf;
 	state.labels = labels;
+	state.line = 0;
+	state.topline = 0;
+
+	enum EditMode editmode = HEXEDITOR;
+	initscr();			/* Start curses mode 		  */
+	cbreak();
+	nonl(); intrflush(stdscr, FALSE); keypad(stdscr, TRUE);
 	noecho();
 	start_color();
 	initColors();
-	curs_set(2);
+	curs_set(0);
 	clear();
 	refresh();
 
+	// Must happen after ncurses setup.
+	state.lineAddresses = malloc(sizeof(int) * (LINES-1));
+
 	// 01234567: 0123 4567  0123 4567  0123 4567  0123 4567 
 	hexwidth = 8 + 2 + 4 * 11;
-//	diswidth = COLS - hexwidth;
+	int diswidth = COLS - hexwidth;
 	hex = newwin(LINES-1, hexwidth, 0, 0);
 	box(hex,0,0);
-//	dis = newwin(LINES-1, diswidth, 0, hexwidth);
-//	box(dis,0,0);
+	diswin = newwin(LINES-1, diswidth, 0, hexwidth);
 	cmd = newwin(1, COLS, LINES-1, 0);
 	box(cmd,0,0);
 	
@@ -307,9 +413,9 @@ void interact(Buffer *buf, Labels *labels, int *blocks, int nblocks) {
 	scrollok(hex, 1);
 	wmove(hex, 0, 0);
 	wrefresh(hex);
-//	wprintw(dis, "Disassembly");
-//	wmove(dis, 0, 0);
-//	wrefresh(dis);
+
+	refilldis(buf, state.line, blocks, nblocks, labels);
+	wrefresh(diswin);
 	wprintw(cmd, ":read %d bytes", buf->len);
 	wmove(cmd, 0, 0);
 	wrefresh(cmd);
@@ -323,12 +429,18 @@ void interact(Buffer *buf, Labels *labels, int *blocks, int nblocks) {
 	wrefresh(hex);
 
 	// Show the disassembly
-	prefresh(dispad, 0, 0, 0, hexwidth, LINES-1, COLS-1);
+	dismoveselection(state.line,state.line);
+//	disasm(buf, state.offset, state.offset+repeats, labels, instrs, 0);
+//	if (dispad) delwin(dispad);
+//	dispad = newdisplaypad(buf, blocks, nblocks, labels);
+//	prefresh(dispad, 0, 0, 0, hexwidth, LINES-1, COLS-1);
+
 
 	int repeats = 0;
 	int hascount = 0;
 	int oldoffset = 0;
 	int hexmode = 0;
+	int oldline = 0;
 
 	while (1) {
 		char ch = getch();
@@ -367,6 +479,56 @@ void interact(Buffer *buf, Labels *labels, int *blocks, int nblocks) {
 		hexmode = 0;
 		if (hascount == 0 && strchr("hjkl", ch)) 
 			repeats = 1;
+
+		if (ch == '	') {
+			editmode ^= 1;
+			Message("Changed mode: %d\n", editmode);
+		}
+		// common mode
+		int handled = 1;
+		switch(ch) {
+		case '/': // Search
+				Unimplemented("Search");
+				break;
+		case ':':
+				{
+				char buf[128];
+				nodelay(cmd, FALSE);
+				echo();
+				mvwaddch(cmd, 0,0, ':');
+				mvwgetnstr(cmd, 0,1, buf, 128);
+				noecho();
+				if (exec(buf)) return;
+				Message("Command: %s", buf);
+				}
+				break;
+		case 'g':
+				oldline = state.line;
+				oldoffset = state.offset;
+				state.offset = repeats;
+				if (state.offset > state.buf->len) state.offset = state.buf->len;
+				hexmoveselection(oldoffset, state.offset);
+				int line = offsetToLine(&state, state.offset);
+				if (line >= 0) {
+					state.line = line;
+					dismoveselection(oldline, state.line);
+				} else {
+					showLine(&state);
+				}
+				break;
+/*		case 'G': 
+				oldoffset = state.offset;
+				if (hascount==0) repeats = state.buf->len-1;
+				state.offset = repeats;
+				if (state.offset > state.buf->len) state.offset = state.buf->len;
+				hexmoveselection(oldoffset, state.offset);
+				break;
+*/
+		default:
+				handled = 0;
+		}
+		if (handled) goto nextloop;
+		if (editmode == HEXEDITOR) {
 		switch(ch) {
 		case 'd':
 				Unimplemented("Data mode");
@@ -396,21 +558,6 @@ void interact(Buffer *buf, Labels *labels, int *blocks, int nblocks) {
 				Unimplemented("Disassemble");
 
 				break;
-		case '/': // Search
-				Unimplemented("Search");
-				break;
-		case ':':
-				{
-				char buf[128];
-				nodelay(cmd, FALSE);
-				echo();
-				mvwaddch(cmd, 0,0, ':');
-				mvwgetnstr(cmd, 0,1, buf, 128);
-				noecho();
-				if (exec(buf)) return;
-				Message("Command: %s", buf);
-				}
-				break;
 
 		case 'h':
 				oldoffset = state.offset;
@@ -436,20 +583,32 @@ void interact(Buffer *buf, Labels *labels, int *blocks, int nblocks) {
 				if (state.offset > state.buf->len) state.offset = state.buf->len;
 				hexmoveselection(oldoffset, state.offset);
 				break;
-		case 'g':
+		}
+		} else if (editmode == DISASMEDITOR) {
+		switch(ch) {
+
+		case 'j':
+				oldline = state.line;
+				state.line+=repeats;
+				if (state.line < 0) state.line = 0;
+				dismoveselection(oldline, state.line);
 				oldoffset = state.offset;
-				state.offset = ROWWIDTH * repeats;
-				if (state.offset > state.buf->len) state.offset = state.buf->len;
+				state.offset = state.lineAddresses[state.line];
 				hexmoveselection(oldoffset, state.offset);
 				break;
-		case 'G': 
+		case 'k':
+				oldline = state.line;
+				state.line-=repeats;
+				if (state.line < 0) state.line = 0;
+				dismoveselection(oldline, state.line);
 				oldoffset = state.offset;
-				if (hascount==0) repeats = state.buf->len-1;
-				state.offset = repeats;
-				if (state.offset > state.buf->len) state.offset = state.buf->len;
+				state.offset = state.lineAddresses[state.line];
 				hexmoveselection(oldoffset, state.offset);
 				break;
 		}
+		
+		}
+		nextloop:
 		repeats = 0;
 		hascount = 0;
 	}
@@ -491,22 +650,14 @@ int main(void)
 	fclose(fp);
 	buf.curptr = buf.bytes;
 
+	IList *instrs = newIList();
+	loadanddis(&buf, labels, instrs);
+
 	// Calculate basic blocks
 	int *blocks, nblocks, *invalid, ninvalid;
 	findBasicBlocks(&buf, &blocks, &nblocks, &invalid, &ninvalid);
 
 	generateLabels(labels, blocks, nblocks);
-	
-
-	IList *instrs = newIList();
-	loadanddis(&buf, labels, instrs);
-
-	initscr();			/* Start curses mode 		  */
-	cbreak();
-	nonl(); intrflush(stdscr, FALSE); keypad(stdscr, TRUE);
-
-	// Prep the pad for disassembly
-	dispad = newdisplaypad(&buf, blocks, nblocks, labels);
 
 
 	buf.curptr = buf.bytes;
