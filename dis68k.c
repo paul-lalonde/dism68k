@@ -1257,11 +1257,10 @@ int disasm(Buffer *gBuf, unsigned long int start, unsigned long int end, Labels 
 	return 0;
 }
 
-int disasmone(Buffer *gBuf, int start, Instruction *retval) {
+int disasmone(Buffer *gBuf, int start, Instruction *retval, Labels *labels) {
 	Instruction inst[2];
 	IList output = {.instrs = inst, .len=0, .cap=2}; // Should never realloc.
-	Labels labels = {.labels = 0, .len=0, .cap=0};
-	if ( disasm(gBuf, start, gBuf->len, &labels, &output, 1) ) {
+	if ( disasm(gBuf, start, gBuf->len, labels, &output, 1) ) {
 		*retval = inst[0];
 		return 1;
 	}
@@ -1314,23 +1313,15 @@ void datadump(Buffer *gBuf, uint32_t start, uint32_t end) {
 	}
 }
 
-int rundis(Buffer *bin, char *mapfilename, Labels *labels, IList *instrs) {
+int rundis(Buffer *bin, BasicBlock *blocks, int nblocks, Labels *labels, IList *instrs) {
+	bin->curptr = bin->bytes;
+	address = 0;
+	romstart = 0;
 
-	if (!readmap(mapfilename)) {
-		return EXIT_FAILURE;
-	}
-	size_t index = 0;
-	while (map[index].type != End) {
-		if (map[index].type == Data) datadump(bin, map[index].start, map[index].end);
-		if (map[index].type == Code) disasm(bin, map[index].start, map[index].end, labels, instrs, 0);
-		++ index;
+	for(int i = 0; i < nblocks; i++) {
+		if (blocks[i].isdata) datadump(bin, blocks[i].begin, blocks[i].end);
+		else disasm(bin, blocks[i].begin, blocks[i].end, labels, instrs, 0);
 	}
 	return 0;
-}
-
-
-void loadanddis(Buffer *bin, Labels *labels, IList *instrs) {
-	char *mapfilename = "mapfile";
-	rundis(bin, mapfilename, labels, instrs);
 }
 

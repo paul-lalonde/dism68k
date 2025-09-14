@@ -210,7 +210,7 @@ int filldisline(Buffer *bin, int addr, int line, BasicBlock *blocks, int nblocks
 	} 
 	int l;
 	for(int a = blocks[bb].begin; a < blocks[bb].end; ) {
-		disasmone(bin, a, &inst);
+		disasmone(bin, a, &inst, labels);
 		if (inst.address == addr) {
 			if ((l = findLabelByAddr(labels, addr)) != -1) {
 				mvwprintw(diswin, line, 0, "%08x", addr);
@@ -234,34 +234,6 @@ int filldisline(Buffer *bin, int addr, int line, BasicBlock *blocks, int nblocks
 		}
 	}
 	return -1; // We're probably in a data segment...
-}
-
-int exec(char *s) {
-	// This should really be a little language, like ed.
-	// <range><cmd>/<param>/  
-	// But for now it's a hack.
-	if (strlen(s) < 1) return FALSE;
-
-	switch(s[0]) {
-	case 'n':
-		addLabel(state.labels, s+1, state.offset, 0);
-		break;
-	case 'p':
-		if (s[1] == 0) {
-			strcat(s, "labels.txt");
-		}
-		FILE *fp = fopen(s+1, "w");
-		for(int i=0; i < state.labels->len; i++) {
-			if (!state.labels->labels[i].generated)
-				fprintf(fp,"%0x %s\n", state.labels->labels[i].addr, state.labels->labels[i].name);
-		}
-		fclose(fp);
-		break;
-	case 'q':
-		return TRUE;
-			
-	}
-	return FALSE;
 }
 
 void hexmoveselection(int oldpos, int pos) {
@@ -351,7 +323,7 @@ int offsetToLine(State *state, int offset) {
 	for (int addr = state->blocks[bb].begin; addr < state->blocks[bb].end; ) {
 		if (addr == offset) return lineno;
 		Instruction inst;
-		disasmone(state->buf, addr, &inst);
+		disasmone(state->buf, addr, &inst, state->labels);
 		addr += inst.nbytes;
 		lineno++;	
 	}
@@ -404,6 +376,48 @@ void dismoveselection(Buffer *bin, BasicBlock *blocks, int nblocks, Labels *labe
 void markasdata(int begin, int end) {
 	Unimplemented("markasdata");
 }
+
+int exec(char *s) {
+	// This should really be a little language, like ed.
+	// <range><cmd>/<param>/  
+	// But for now it's a hack. And if you want an address on the front in hex, then you lose all commands 0-f
+	if (strlen(s) < 1) return FALSE;
+	// Might have an address in front.
+	char ch;
+	char str[128];
+	unsigned int addr;
+	int matches = sscanf(s, "%x%c%127s", &addr, &ch, str);
+	if (matches == 0) {
+		addr = state.offset;
+		matches = sscanf(s, "%c%s", &ch, str);
+		if (matches == 0) { return FALSE; }
+	}
+
+	switch(ch) {
+	case 'n':
+		addLabel(state.labels, str, addr, 0);
+		wclear(diswin);
+		refilldis(state.buf, linetoaddr(state.buf, state.blocks, state.nblocks, state.topline), state.blocks, state.nblocks, state.labels);
+		wrefresh(diswin);
+		break;
+	case 'p':
+		if (str[0] == 0) {
+			strcat(s, "labels.txt");
+		}
+		FILE *fp = fopen(s+1, "w");
+		for(int i=0; i < state.labels->len; i++) {
+			if (!state.labels->labels[i].generated)
+				fprintf(fp,"%0x %s\n", state.labels->labels[i].addr, state.labels->labels[i].name);
+		}
+		fclose(fp);
+		break;
+	case 'q':
+		return TRUE;
+			
+	}
+	return FALSE;
+}
+
 
 enum EditMode {
 	HEXEDITOR = 0,
@@ -692,15 +706,12 @@ int main(void)
 	fclose(fp);
 	buf.curptr = buf.bytes;
 
-	IList *instrs = newIList();
-	loadanddis(&buf, labels, instrs);
-
 	// Calculate basic blocks
 	BasicBlock *blocks=0;
 	int nblocks, *invalid, ninvalid;
 	findBasicBlocks(&buf, &blocks, &nblocks, &invalid, &ninvalid);
 	generateLabels(labels, blocks, nblocks);
-
+	
 	FILE *outfile = fopen("disasm.txt", "w");
 	Instruction instr;
 	int l;
@@ -719,7 +730,7 @@ int main(void)
 				addr = blocks[i].end;
 				continue;
 			}
-			disasmone(&buf, addr, &instr);
+			disasmone(&buf, addr, &instr, state.labels);
 			fprintf(outfile, "\t\t%s%s\n", instr.asm, str);
 			str[0] = 0;
 			addr += instr.nbytes;

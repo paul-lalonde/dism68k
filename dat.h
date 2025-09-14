@@ -81,9 +81,9 @@ void freeIList(IList *);
 void clearIList(IList *);
 void appendInstruction(IList *, Instruction);
 
+int rundis(Buffer *bin, BasicBlock *blocks, int nblocks, Labels *labels, IList *instrs);
 extern int disasm(Buffer *bin, unsigned long int start, unsigned long int end, Labels *labels, IList *, int justOne);
-extern int disasmone(Buffer *bin, int start, Instruction *retval);
-extern void loadanddis(Buffer *, Labels *, IList *);
+extern int disasmone(Buffer *bin, int start, Instruction *retval, Labels *labels);
 
 void findBasicBlocks(Buffer *bin, BasicBlock **out, int *outlen, int **invalid, int *ninvalid);
 int findAddr(int addr, BasicBlock *blocks, int nblocks);

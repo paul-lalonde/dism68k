@@ -43,6 +43,7 @@ int countlines(BasicBlock *blocks, int nblocks) {
 		else lineno += blocks[i].ninstr;
 	}
 }
+
 void findBasicBlocks(Buffer *bin, BasicBlock **outblocks, int *nblocks, int **invalid, int *ninvalid) {
 	BasicBlock *blocks = NULL;
 	int blockCount = 0;
@@ -81,9 +82,9 @@ void findBasicBlocks(Buffer *bin, BasicBlock **outblocks, int *nblocks, int **in
 		int addr = stack[--stackTop];
 		
 		if (addr >= bin->len || visited[addr]) continue;
-		
+		Labels labels = {.len = 0};
 		struct Instruction inst;
-		if (!disasmone(bin, addr, &inst)) {
+		if (!disasmone(bin, addr, &inst, &labels)) {
 			// Invalid instruction
 			if (invalidCount >= invalidCapacity) {
 				invalidCapacity = invalidCapacity ? invalidCapacity * 2 : 16;
@@ -140,7 +141,8 @@ void findBasicBlocks(Buffer *bin, BasicBlock **outblocks, int *nblocks, int **in
 		// Find end of basic block
 		while (currentAddr < bin->len && visited[currentAddr]) {
 			struct Instruction inst;
-			if (!disasmone(bin, currentAddr, &inst)) {
+			Labels labels = {.len = 0};
+			if (!disasmone(bin, currentAddr, &inst, &labels)) {
 				break;
 			}
 			
@@ -273,7 +275,8 @@ int linetoaddr(Buffer *bin, BasicBlock *blocks, int nblocks, int line) {
 	int lineno = blocks[bb].lineno; 
 	int addr = blocks[bb].begin;
 	while (lineno != line && addr < blocks[bb].end) {
-		disasmone(bin, addr, &instr);
+		Labels labels = {.len = 0};
+		disasmone(bin, addr, &instr, &labels);
 		addr += instr.nbytes;
 		lineno++;
 	}
