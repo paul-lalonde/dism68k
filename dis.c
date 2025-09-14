@@ -687,6 +687,10 @@ void generateLabels(Labels *l, BasicBlock *blocks, int nblocks) {
 		}
 	}
 }
+void myfprint(char *s, int addr, void *d) {
+	FILE *fp = (FILE *)d;
+	fprintf(fp, "%08x\t\t\t%s", addr, s);
+}
 
 int main(void)
 {	// yes, we need command line parsing now.
@@ -732,6 +736,7 @@ int main(void)
 				fprintf(outfile, "%08x ", addr);
 			}
 			if (blocks[i].isdata) {
+				datadump(&buf, blocks[i].begin, blocks[i].end, myfprint, outfile);
 				fprintf(outfile, "\t\tDATA\n");
 				addr = blocks[i].end;
 				continue;

@@ -1246,7 +1246,7 @@ int disasm(Buffer *gBuf, unsigned long int start, unsigned long int end, Labels 
 			asprintf(&instr.asm, "%-8s %s", opcode_s, operand_s);
 			instr.nbytes = (gBuf->curptr-gBuf->bytes) - instr.address;
 			gBufprintf("%-8s %s\n", opcode_s, operand_s);
-			appendInstruction(output, instr);
+			appendInstruction(output, instr.address, instr);
 		} else {
 			gBufprintf("???\n");
 			if (justone) return 0;
@@ -1274,43 +1274,50 @@ int disasmone(Buffer *gBuf, int start, Instruction *retval, Labels *labels) {
 
 	Any bytes that are within the printable character range are output as
 	those characters; full stops fill in for unprintable characters.
+	
+	returns number of lines written
 */
-void datadump(Buffer *gBuf, uint32_t start, uint32_t end) {
+int datadump(Buffer *gBuf, uint32_t start, uint32_t end, void (*write)(char *, int addr, void *), void *d) {
+	int nlines = 0;
 	address = start;
 	if (address < romstart) {
 		fprintf(stderr, "Address < RomStart in datadump()!\n");
 		exit(EXIT_FAILURE);
 	}
 
-	while (!endofgBuf(gBuf) && (address < end)) {
-		char asm[128];
-		asm[0] = 0;
-		//gBufprintf("%08x : ", address);
+	char asm[128];
+	int lineaddr = address;
+	asm[0] = 0;
 
-		const uint32_t reamaining_bytes = end - address;
-		const int  bytes_to_print = (reamaining_bytes > 16) ? 16 : reamaining_bytes;
-
-		int toprint[16] ;
-		for (int i = 0; i < 16; ++i) {
-			if (i >= bytes_to_print)
-				strcat(asm, "   ");
-			else
-				toprint[i] = getbyte(gBuf);
-		}
-		strcat(asm, "  ");
-		for (int i = 0; i < 16; ++i) {
-			const int byte = toprint[i];
-			if (i >= bytes_to_print)
-				strcat(asm, " ");
-			else if (isprint(byte)) {
+	// print in linesof 16 bytes
+	for(int i = (address & ~0xf); i < ((end + 0xf)&~0xf); i++) {
+		if (i < start || i >= end) {
+			strcat(asm, " ");
+		} else {
+			int byte = getbyte(gBuf);
+			 if (isprint(byte)) {
 				char s[2];
 				s[0] = byte; s[1] = 0;
 				strcat(asm, s);
 			} else
 				strcat(asm, ".");
 		}
-		strcat(asm,"\n");
+
+		if ((i & 0xf) == 15) {
+			strcat(asm,"\n");
+			write(asm, lineaddr, d);
+			asm[0] = 0;
+			nlines++;
+			lineaddr = address;
+		}
 	}
+	return nlines;
+}
+
+void addinstr(char *s, int addr, void *d) {
+	IList *instrs = (IList *)d;
+	Instruction inst = {.asm=s, .address=addr};
+	appendInstruction(instrs, addr, inst);
 }
 
 int rundis(Buffer *bin, BasicBlock *blocks, int nblocks, Labels *labels, IList *instrs) {
@@ -1319,7 +1326,7 @@ int rundis(Buffer *bin, BasicBlock *blocks, int nblocks, Labels *labels, IList *
 	romstart = 0;
 
 	for(int i = 0; i < nblocks; i++) {
-		if (blocks[i].isdata) datadump(bin, blocks[i].begin, blocks[i].end);
+		if (blocks[i].isdata) datadump(bin, blocks[i].begin, blocks[i].end, addinstr, instrs);
 		else disasm(bin, blocks[i].begin, blocks[i].end, labels, instrs, 0);
 	}
 	return 0;
