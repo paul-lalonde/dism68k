@@ -20,28 +20,7 @@
 static uint32_t address, romstart;
 bool rawmode = false;
 
-void freeDisLine(DisLine *dl) {
-	free(dl->asm);
-	dl->asm = NULL;
-}
-
-
-
-void gBufprintf(char *s, ...) {
-/*
-	static char tmpline[512];
-	char *line;
-	va_list args;
- 	va_start (args, s);
-  	vasprintf (&line, s, args);
-	va_end (args);
-	strcat(tmpline, line);
-	if (strchr(line, '\n') != NULL) {
-		addDisLine(listing, tmpline, address);
-		tmpline[0] = 0;
-	}
-*/
-}
+void gBufprintf(char *s, ...) {}
 
 
 // Enable the #define below to print diagnostics.

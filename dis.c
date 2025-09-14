@@ -1,10 +1,12 @@
 #include <assert.h>
 #include <fcntl.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <strings.h>
 #include <ncurses.h>
 #include <errno.h>
+#include <unistd.h>
 #include "dat.h"
 
 #define ROWWIDTH 16 // Hex displays 16 bytes per row.  Suck it.
@@ -142,6 +144,8 @@ typedef struct {
 	int dmstartoffset;
 	Buffer *buf;
 	Labels *labels;
+	BasicBlock *blocks;
+	int nblocks;
 
 	// DISASM
 	int line;
@@ -149,6 +153,7 @@ typedef struct {
 	int bblock; // index of first basic block on our screen.
 	IList *instructions; // Instructions currently in dispad?
 	int *lineAddresses;
+	
 } State;
 
 static State state;
@@ -193,28 +198,34 @@ void hexstandout(int pos, int on) {
 	stylebyte(pos+1, on, A_STANDOUT);
 }
 
-int filldisline(Buffer *bin, int addr, int line, int *blocks, int nblocks, Labels *labels) {
+int filldisline(Buffer *bin, int addr, int line, BasicBlock *blocks, int nblocks, Labels *labels) {
 	// find the basic block containing addr, disassemble it until we get to addr
 	int bb = findAddr(addr, blocks, nblocks);
 	Instruction inst;
+
+	if (blocks[bb].isdata) {
+		mvwprintw(diswin, line, 0, "%08x : DATA ", addr);
+		
+		return blocks[bb].end;
+	} 
 	int l;
-	for(int a = blocks[2*bb]; a < blocks[2*bb+1]; ) {
+	for(int a = blocks[bb].begin; a < blocks[bb].end; ) {
 		disasmone(bin, a, &inst);
 		if (inst.address == addr) {
 			if ((l = findLabelByAddr(labels, addr)) != -1) {
-				wprintw(diswin, "%08x", addr);
+				mvwprintw(diswin, line, 0, "%08x", addr);
 				mvwprintw(diswin, line, 20 - strlen(labels->labels[l].name) - 2 , "%s: ", labels->labels[l].name);
 			} else {
-				wprintw(diswin, "%08x ", addr);
+				mvwprintw(diswin, line, 0, "%08x ", addr);
 			}
 
-			mvwprintw(diswin, line, 20, "%s\n", inst.asm);
+			mvwprintw(diswin, line, 20, "%s", inst.asm);
 			int nextaddr = addr + inst.nbytes;
-			if (nextaddr > blocks[2*bb+1]) { // Past the end of this block.
+			if (nextaddr > blocks[bb].end) { // Past the end of this block.
 				if (2*(bb+1) < nblocks) {
-					nextaddr = blocks[2*(bb+1)]; // In the next block.
+					nextaddr = blocks[bb+1].begin; // In the next block.
 				} else {
-					nextaddr = -1; // Past the end of basic blocks
+					nextaddr = -2; // Past the end of basic blocks
 				}
 			}
 			return nextaddr;
@@ -222,38 +233,8 @@ int filldisline(Buffer *bin, int addr, int line, int *blocks, int nblocks, Label
 			a += inst.nbytes;
 		}
 	}
-	return -1;
+	return -1; // We're probably in a data segment...
 }
-
-/*
-WINDOW *newdisplaypad(Buffer *bin, int *blocks, int nblocks, Labels *labels) {
-	WINDOW *dispad = newpad(bin->len, 80);
-	int count = 0;
-	IList *instrs = newIList();
-	for (int i = 0; i < 2 * nblocks; i += 2) {
-		disasm(bin, blocks[i], blocks[i+1], labels, instrs, 0);
-		for (int j = 0; j < instrs->len; j++) {
-			int l;
-			int r, c;
-			getyx(dispad,r,c);
-			if ((l = findLabelByAddr(labels, instrs->instrs[j].address)) != -1) {
-				wprintw(dispad, "%08x", instrs->instrs[j].address);
-				mvwprintw(dispad, r, 20 - strlen(labels->labels[l].name) - 2 , "%s: ", labels->labels[l].name);
-			} else {
-				wprintw(dispad, "%08x ", instrs->instrs[j].address);
-			}
-
-			mvwprintw(dispad, r, 20, "%s\n", instrs->instrs[j].asm);
-			if (++count > 1000) goto done;
-		}
-		clearIList(instrs);
-		// There might be a data block here.
-	}
-	done:
-	freeIList(instrs);
-	return dispad;
-}
-*/
 
 int exec(char *s) {
 	// This should really be a little language, like ed.
@@ -305,7 +286,6 @@ void hexmoveselection(int oldpos, int pos) {
 		state.windowoffset -= nlines * ROWWIDTH;
 		// We now have to fill lines between oldoffset and pos.
 		if (nlines > hy) nlines = hy;
-Message("target pos %0x at (r,c): %d, %d; hy = %d; nlines = %d", pos, r, c, hy, nlines);
 		fill(state.buf->bytes, state.buf->len, state.windowoffset, 0, nlines, 0, NORMALMODE, color);
 	} else if (r >= hy) {
 		int nlines = r - hy + 1; 
@@ -325,6 +305,7 @@ void styleline(int line, int on, int attr) {
 	int nrows, ncols;
 	getmaxyx(diswin, nrows, ncols);
 	int r = line - state.topline;
+	if (r > LINES-1 || r < 0) return;
 	for (int c = 0; c < ncols; c++) {
 		chtype ch0 = mvwinch(diswin, r, c);
 		if (on) {
@@ -335,25 +316,84 @@ void styleline(int line, int on, int attr) {
 	}
 }
 
+void refilldis(Buffer *bin, int addr, BasicBlock *blocks, int nblocks, Labels *labels) {
+	wclear(diswin);
+	int nextaddr = addr;
+	for(int r=0; r<LINES-1;r++) {
+		state.lineAddresses[r] = nextaddr;
+		nextaddr = filldisline(bin, nextaddr, r, blocks, nblocks, labels);
+		assert(nextaddr != -1);
+		assert(nextaddr != -2);
+	}
+}
+
 // Make sure state->line is both disassembled and on screen.
-void showLine(State *state) {
-	// If it's alread onscreen, do nothing.
+void showLine(State *state, int iline) {
+	int line = iline - state->topline;
+	int hy, hx;
+	getmaxyx(diswin, hy, hx); // Macro.
+	if (line > hy || line < 0) {
+		wclear(diswin);
+		state->line = iline;
+		state->topline = iline - hy/2;
+		if (state->topline < 0) state->topline = 0;
+		refilldis(state->buf, linetoaddr(state->buf, state->blocks, state->nblocks, state->topline), state->blocks, state->nblocks, state->labels);
+		wrefresh(diswin);
+	} 
 }
 
 int offsetToLine(State *state, int offset) {
-	for(int i = 0; i < LINES-1; i++) {
-		if (state->lineAddresses[i] >= offset) {
-			return i;
-		}
+	int bb = findAddr(offset, state->blocks, state->nblocks);
+	int lineno = state->blocks[bb].lineno;
+	if (state->blocks[bb].isdata) {
+		return lineno; // TODO(PAL): Will break when we expand data
 	}
-	return -1; // offscreen
+	for (int addr = state->blocks[bb].begin; addr < state->blocks[bb].end; ) {
+		if (addr == offset) return lineno;
+		Instruction inst;
+		disasmone(state->buf, addr, &inst);
+		addr += inst.nbytes;
+		lineno++;	
+	}
+	return -1;
 }
 
-void dismoveselection(int oldline, int line) {
+// oldline and line are in absolue coordinates; window top is in state.topline
+void dismoveselection(Buffer *bin, BasicBlock *blocks, int nblocks, Labels *labels, int oldline, int line) {
 	// remove highlight from old line.
+	int r = oldline - state.topline;
 	styleline(oldline, 0, A_STANDOUT);
 
-	// scroll if needed.
+	int hy, hx;
+	getmaxyx(diswin, hy, hx); // Macro.
+
+	int addr = linetoaddr(bin, blocks, nblocks, line);
+
+	
+	// Scroll if needed.  
+	r = line - state.topline;
+	if (r < 0) {
+		int nlines = -r ;
+		scrollok(diswin, 1);
+		wscrl(diswin, -nlines);
+		scrollok(diswin, 0);
+		state.topline -= nlines;
+		if (nlines > hy) nlines = hy;
+		for( int i = 0; i < nlines; i++) {
+			state.lineAddresses[i] = addr;
+			addr = filldisline(bin, addr, i, blocks, nblocks, labels);
+		}
+	} else if (r >= hy) { // r is the offset to the new line from topline.
+		int nlines = r - hy + 1; 
+		scrollok(diswin, 1);
+		wscrl(diswin, nlines);
+		scrollok(diswin, 0);
+		state.topline += nlines;
+		for( int i = 0; i < nlines; i++) {
+			state.lineAddresses[(hy-nlines) + i] = addr;
+			addr = filldisline(bin, addr, (hy-nlines) + i, blocks, nblocks, labels);
+		}
+	}
 
 	styleline(line, 1, A_STANDOUT);
 
@@ -370,21 +410,13 @@ enum EditMode {
 	DISASMEDITOR
 };
 
-void refilldis(Buffer *bin, int addr, int *blocks, int nblocks, Labels *labels) {
-	wclear(diswin);
-	int nextaddr = 0;
-	for(int r=0; r<LINES-1;r++) {
-		state.lineAddresses[r] = nextaddr;
-		nextaddr = filldisline(bin, nextaddr, r, blocks, nblocks, labels);
-		assert(nextaddr != -1);
-	}
-}
-
-void interact(Buffer *buf, Labels *labels, int *blocks, int nblocks) {
+void interact(Buffer *buf, Labels *labels, BasicBlock *blocks, int nblocks) {
 	state.buf = buf;
 	state.labels = labels;
 	state.line = 0;
 	state.topline = 0;
+	state.blocks = blocks;
+	state.nblocks = nblocks;
 
 	enum EditMode editmode = HEXEDITOR;
 	initscr();			/* Start curses mode 		  */
@@ -399,6 +431,7 @@ void interact(Buffer *buf, Labels *labels, int *blocks, int nblocks) {
 
 	// Must happen after ncurses setup.
 	state.lineAddresses = malloc(sizeof(int) * (LINES-1));
+	memset(state.lineAddresses, 0, sizeof(int)*(LINES-1));
 
 	// 01234567: 0123 4567  0123 4567  0123 4567  0123 4567 
 	hexwidth = 8 + 2 + 4 * 11;
@@ -406,6 +439,7 @@ void interact(Buffer *buf, Labels *labels, int *blocks, int nblocks) {
 	hex = newwin(LINES-1, hexwidth, 0, 0);
 	box(hex,0,0);
 	diswin = newwin(LINES-1, diswidth, 0, hexwidth);
+	scrollok(diswin, 0);
 	cmd = newwin(1, COLS, LINES-1, 0);
 	box(cmd,0,0);
 	
@@ -414,7 +448,7 @@ void interact(Buffer *buf, Labels *labels, int *blocks, int nblocks) {
 	wmove(hex, 0, 0);
 	wrefresh(hex);
 
-	refilldis(buf, state.line, blocks, nblocks, labels);
+	refilldis(buf, state.lineAddresses[0], blocks, nblocks, labels);
 	wrefresh(diswin);
 	wprintw(cmd, ":read %d bytes", buf->len);
 	wmove(cmd, 0, 0);
@@ -429,12 +463,7 @@ void interact(Buffer *buf, Labels *labels, int *blocks, int nblocks) {
 	wrefresh(hex);
 
 	// Show the disassembly
-	dismoveselection(state.line,state.line);
-//	disasm(buf, state.offset, state.offset+repeats, labels, instrs, 0);
-//	if (dispad) delwin(dispad);
-//	dispad = newdisplaypad(buf, blocks, nblocks, labels);
-//	prefresh(dispad, 0, 0, 0, hexwidth, LINES-1, COLS-1);
-
+	dismoveselection(buf, blocks, nblocks, labels, state.line, state.line);
 
 	int repeats = 0;
 	int hascount = 0;
@@ -509,11 +538,14 @@ void interact(Buffer *buf, Labels *labels, int *blocks, int nblocks) {
 				if (state.offset > state.buf->len) state.offset = state.buf->len;
 				hexmoveselection(oldoffset, state.offset);
 				int line = offsetToLine(&state, state.offset);
-				if (line >= 0) {
+				int r = line - state.topline;
+				if (r >= 0 && r < LINES-1) {
 					state.line = line;
-					dismoveselection(oldline, state.line);
+					dismoveselection(buf, blocks, nblocks, labels, oldline, state.line);
 				} else {
-					showLine(&state);
+					showLine(&state, line);
+					state.line = line;
+					dismoveselection(buf, blocks, nblocks, labels, state.line, state.line);
 				}
 				break;
 /*		case 'G': 
@@ -586,23 +618,32 @@ void interact(Buffer *buf, Labels *labels, int *blocks, int nblocks) {
 		}
 		} else if (editmode == DISASMEDITOR) {
 		switch(ch) {
+		case 0x07:
+				Message("On line %d\n", state.line);
+				break;
+		case 'r': // refresh
+				wclear(diswin);
+				refilldis(buf, linetoaddr(state.buf, state.blocks, state.nblocks, state.topline), blocks, nblocks, labels);
+				wrefresh(diswin);
+				break;
 
 		case 'j':
 				oldline = state.line;
 				state.line+=repeats;
-				if (state.line < 0) state.line = 0;
-				dismoveselection(oldline, state.line);
+				if (state.line >= (blocks[nblocks-1].lineno + blocks[nblocks-1].ninstr)) 
+					state.line = blocks[nblocks-1].lineno + blocks[nblocks-1].ninstr;
+				dismoveselection(buf, blocks, nblocks, labels, oldline, state.line);
 				oldoffset = state.offset;
-				state.offset = state.lineAddresses[state.line];
+				state.offset = state.lineAddresses[state.line-state.topline];
 				hexmoveselection(oldoffset, state.offset);
 				break;
 		case 'k':
 				oldline = state.line;
 				state.line-=repeats;
 				if (state.line < 0) state.line = 0;
-				dismoveselection(oldline, state.line);
+				dismoveselection(buf, blocks, nblocks, labels, oldline, state.line);
 				oldoffset = state.offset;
-				state.offset = state.lineAddresses[state.line];
+				state.offset = state.lineAddresses[state.line-state.topline];
 				hexmoveselection(oldoffset, state.offset);
 				break;
 		}
@@ -617,12 +658,12 @@ void interact(Buffer *buf, Labels *labels, int *blocks, int nblocks) {
 
 // Only generate labels if there isn't already a label for that address.
 // Add them as auto-generated so they don't get saved and restored.
-void generateLabels(Labels *l, int *blocks, int nblocks) {
-	for(int i = 0; i < 2*nblocks; i+=2) {
-		if (findLabelByAddr(l, blocks[i]) == -1) {
+void generateLabels(Labels *l, BasicBlock *blocks, int nblocks) {
+	for(int i = 0; i < nblocks; i++) {
+		if (findLabelByAddr(l, blocks[i].begin) == -1) {
 			char buf[128];
-			sprintf(buf, "L%06x", blocks[i]);
-			addLabel(l, buf, blocks[i], 1);
+			sprintf(buf, "L%06x", blocks[i].begin);
+			addLabel(l, buf, blocks[i].begin, 1);
 		}
 	}
 }
@@ -630,6 +671,7 @@ void generateLabels(Labels *l, int *blocks, int nblocks) {
 int main(void)
 {	// yes, we need command line parsing now.
 
+	//kill(getpid(), SIGSTOP);
 	Labels *labels = newLabels(1);
 	state.labels = labels;
 	FILE *fp = fopen("labels.txt", "r");
@@ -654,12 +696,37 @@ int main(void)
 	loadanddis(&buf, labels, instrs);
 
 	// Calculate basic blocks
-	int *blocks, nblocks, *invalid, ninvalid;
+	BasicBlock *blocks=0;
+	int nblocks, *invalid, ninvalid;
 	findBasicBlocks(&buf, &blocks, &nblocks, &invalid, &ninvalid);
-
 	generateLabels(labels, blocks, nblocks);
 
-
+	FILE *outfile = fopen("disasm.txt", "w");
+	Instruction instr;
+	int l;
+	for(int i = 0; i < nblocks; i++) {
+		char str[128];
+		sprintf(str, "\t# Block %d:%06x-%06x: line %d", i, blocks[i].begin, blocks[i].end, blocks[i].lineno); 
+		for(int addr = blocks[i].begin; addr < blocks[i].end; ) {
+			if ((l = findLabelByAddr(labels, addr)) != -1) {
+//				fprintf(outfile, "%08x", addr);
+				fprintf(outfile, "%s: ", labels->labels[l].name);
+			} else {
+				fprintf(outfile, "%08x ", addr);
+			}
+			if (blocks[i].isdata) {
+				fprintf(outfile, "\t\tDATA\n");
+				addr = blocks[i].end;
+				continue;
+			}
+			disasmone(&buf, addr, &instr);
+			fprintf(outfile, "\t\t%s%s\n", instr.asm, str);
+			str[0] = 0;
+			addr += instr.nbytes;
+		}
+	}
+	fclose(outfile);
+	
 	buf.curptr = buf.bytes;
 	interact(&buf, labels, blocks, nblocks);
 

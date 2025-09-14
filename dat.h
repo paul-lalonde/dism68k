@@ -1,5 +1,4 @@
-typedef struct CodeBlock CodeBlock;
-typedef struct DisLine DisLine;
+typedef struct BasicBlock BasicBlock;
 typedef struct Buffer Buffer;
 typedef struct IList IList;
 typedef struct Instruction Instruction;
@@ -10,11 +9,6 @@ struct Buffer {
 	unsigned char *bytes;
 	size_t len;
 	unsigned char *curptr;
-};
-
-struct DisLine {
-	char *asm;
-	int addr;
 };
 
 #define MAXLABELLEN 64
@@ -30,14 +24,12 @@ struct Labels {
 	int cap;
 };
 
-struct CodeBlock {
+struct BasicBlock {
 	int begin, end;
-	int *comefrom;
-	int ncomefrom;
-	int comefromcap;
-
-	int *goesto; // Address this block goes to.  
-	int subreturn; // do I end in a subroutine return?
+	int ninstr;
+	int lineno, nlines;
+	int isdata;
+	int nbytes;
 };
 
 Labels *newLabels(int cap);
@@ -93,5 +85,7 @@ extern int disasm(Buffer *bin, unsigned long int start, unsigned long int end, L
 extern int disasmone(Buffer *bin, int start, Instruction *retval);
 extern void loadanddis(Buffer *, Labels *, IList *);
 
-void findBasicBlocks(Buffer *bin, int **outarray, int *outarraylen, int **invalid, int *ninvalid);
-int findAddr(int addr, int *blocks, int nblocks);
+void findBasicBlocks(Buffer *bin, BasicBlock **out, int *outlen, int **invalid, int *ninvalid);
+int findAddr(int addr, BasicBlock *blocks, int nblocks);
+int findBBbyline(BasicBlock *blocks, int nblocks, int line);
+int linetoaddr(Buffer *bin, BasicBlock *blocks, int nblocks, int line);
