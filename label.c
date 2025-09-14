@@ -102,7 +102,7 @@ void freeIList(IList *l) {
 	free(l);
 }
 	
-void appendInstruction(IList *l, Instruction instr) {
+void appendInstruction(IList *l, int addr, Instruction instr) {
 	if (l->len+1 >= l->cap) {
 		l->cap *= 2;
 		l->instrs = (Instruction *)realloc(l->instrs, sizeof(Instruction)*l->cap);

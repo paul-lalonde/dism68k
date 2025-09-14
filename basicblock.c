@@ -42,6 +42,7 @@ int countlines(BasicBlock *blocks, int nblocks) {
 		if (blocks[i].isdata) lineno += 1; 
 		else lineno += blocks[i].ninstr;
 	}
+	return lineno;
 }
 
 void findBasicBlocks(Buffer *bin, BasicBlock **outblocks, int *nblocks, int **invalid, int *ninvalid) {

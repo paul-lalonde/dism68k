@@ -1151,6 +1151,7 @@ int disasm(Buffer *gBuf, unsigned long int start, unsigned long int end, Labels 
 								break;
 							case 73 : sprintf(opcode_s, "RTS");
 								sprintf(operand_s, " ");
+								instr.isRet = 1;
 								break;
 							case 76 : sprintf(opcode_s, "STOP");
 								sprintf(operand_s, " ");

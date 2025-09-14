@@ -687,9 +687,13 @@ void generateLabels(Labels *l, BasicBlock *blocks, int nblocks) {
 		}
 	}
 }
+
+int ntab = 0;
 void myfprint(char *s, int addr, void *d) {
 	FILE *fp = (FILE *)d;
-	fprintf(fp, "%08x\t\t\t%s", addr, s);
+	for(int i=0;i<ntab;i++) fprintf(fp,"\t");
+	fprintf(fp, "%s", s);
+	ntab = 4; // Cheesy "use fewer tabs on each start"
 }
 
 int main(void)
@@ -731,13 +735,13 @@ int main(void)
 		for(int addr = blocks[i].begin; addr < blocks[i].end; ) {
 			if ((l = findLabelByAddr(labels, addr)) != -1) {
 //				fprintf(outfile, "%08x", addr);
-				fprintf(outfile, "%s: ", labels->labels[l].name);
+				fprintf(outfile, "%16s: ", labels->labels[l].name);
 			} else {
-				fprintf(outfile, "%08x ", addr);
+				fprintf(outfile, "%08x\t", addr);
 			}
 			if (blocks[i].isdata) {
+				if (addr == blocks[i].begin) ntab = 2;
 				datadump(&buf, blocks[i].begin, blocks[i].end, myfprint, outfile);
-				fprintf(outfile, "\t\tDATA\n");
 				addr = blocks[i].end;
 				continue;
 			}
