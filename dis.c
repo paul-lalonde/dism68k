@@ -198,28 +198,37 @@ void hexstandout(int pos, int on) {
 	stylebyte(pos+1, on, A_STANDOUT);
 }
 
-int filldisline(Buffer *bin, int addr, int line, BasicBlock *blocks, int nblocks, Labels *labels) {
+
+int ntab = 0;
+void mymvwprint(char *s, int addr, void *d) {
+	int row = (int)(uintptr_t)d;
+	wmove(diswin, row, 0);
+	for(int i=0;i<ntab;i++) wprintw(diswin, "\t");
+	wprintw(diswin, "%s", s);
+}	
+
+int filldisline(Buffer *bin, int addr, int row, BasicBlock *blocks, int nblocks, Labels *labels) {
 	// find the basic block containing addr, disassemble it until we get to addr
 	int bb = findAddr(addr, blocks, nblocks);
 	Instruction inst;
 
 	if (blocks[bb].isdata) {
-		mvwprintw(diswin, line, 0, "%08x : DATA ", addr);
-		
-		return blocks[bb].end;
+		ntab = 2;
+		int rval = datadump(bin, blocks[bb].begin, blocks[bb].end, mymvwprint, (void*)(uintptr_t)(row), row+state.topline - blocks[bb].lineno);
+		return rval;	
 	} 
 	int l;
 	for(int a = blocks[bb].begin; a < blocks[bb].end; ) {
 		disasmone(bin, a, &inst, labels);
 		if (inst.address == addr) {
 			if ((l = findLabelByAddr(labels, addr)) != -1) {
-				mvwprintw(diswin, line, 0, "%08x", addr);
-				mvwprintw(diswin, line, 20 - strlen(labels->labels[l].name) - 2 , "%s: ", labels->labels[l].name);
+				mvwprintw(diswin, row, 0, "%08x", addr);
+				mvwprintw(diswin, row, 20 - strlen(labels->labels[l].name) - 2 , "%s: ", labels->labels[l].name);
 			} else {
-				mvwprintw(diswin, line, 0, "%08x ", addr);
+				mvwprintw(diswin, row, 0, "%08x ", addr);
 			}
 
-			mvwprintw(diswin, line, 20, "%s", inst.asm);
+			mvwprintw(diswin, row, 20, "%s", inst.asm);
 			int nextaddr = addr + inst.nbytes;
 			if (nextaddr > blocks[bb].end) { // Past the end of this block.
 				if (2*(bb+1) < nblocks) {
@@ -318,15 +327,21 @@ int offsetToLine(State *state, int offset) {
 	int bb = findAddr(offset, state->blocks, state->nblocks);
 	int lineno = state->blocks[bb].lineno;
 	if (state->blocks[bb].isdata) {
-		return lineno; // TODO(PAL): Will break when we expand data
+		for(int i=state->blocks[bb].begin; i < state->blocks[bb].end; i++) {
+			if (i == offset) return lineno;
+			if ((i % 16) == 0) lineno++;
+		}
+		return lineno;
 	}
-	for (int addr = state->blocks[bb].begin; addr < state->blocks[bb].end; ) {
-		if (addr == offset) return lineno;
+	int addr;
+	for (addr = state->blocks[bb].begin; addr < state->blocks[bb].end; ) {
+		if (addr >= offset) return lineno;
 		Instruction inst;
 		disasmone(state->buf, addr, &inst, state->labels);
 		addr += inst.nbytes;
 		lineno++;	
 	}
+	if (addr >= offset) return lineno;
 	return -1;
 }
 
@@ -688,7 +703,6 @@ void generateLabels(Labels *l, BasicBlock *blocks, int nblocks) {
 	}
 }
 
-int ntab = 0;
 void myfprint(char *s, int addr, void *d) {
 	FILE *fp = (FILE *)d;
 	for(int i=0;i<ntab;i++) fprintf(fp,"\t");
@@ -741,7 +755,7 @@ int main(void)
 			}
 			if (blocks[i].isdata) {
 				if (addr == blocks[i].begin) ntab = 2;
-				datadump(&buf, blocks[i].begin, blocks[i].end, myfprint, outfile);
+				datadump(&buf, blocks[i].begin, blocks[i].end, myfprint, outfile, -1);
 				addr = blocks[i].end;
 				continue;
 			}

@@ -1276,11 +1276,12 @@ int disasmone(Buffer *gBuf, int start, Instruction *retval, Labels *labels) {
 	Any bytes that are within the printable character range are output as
 	those characters; full stops fill in for unprintable characters.
 	
-	returns number of lines written
+	returns end address written written
 */
-int datadump(Buffer *gBuf, uint32_t start, uint32_t end, void (*write)(char *, int addr, void *), void *d) {
+int datadump(Buffer *gBuf, uint32_t start, uint32_t end, void (*write)(char *, int addr, void *), void *d, int restrictline) {
 	int nlines = 0;
 	address = start;
+	gBuf->curptr = gBuf->bytes+start;
 	if (address < romstart) {
 		fprintf(stderr, "Address < RomStart in datadump()!\n");
 		exit(EXIT_FAILURE);
@@ -1305,14 +1306,17 @@ int datadump(Buffer *gBuf, uint32_t start, uint32_t end, void (*write)(char *, i
 		}
 
 		if ((i & 0xf) == 15) {
-			strcat(asm,"\n");
-			write(asm, lineaddr, d);
+			if (restrictline < 0) strcat(asm,"\n");
+			if (restrictline < 0 || nlines == restrictline)
+				write(asm, lineaddr, d);
+			if (nlines == restrictline) 
+				return i > end ? end : i+1;
 			asm[0] = 0;
 			nlines++;
 			lineaddr = address;
 		}
 	}
-	return nlines;
+	return end;
 }
 
 void addinstr(char *s, int addr, void *d) {
@@ -1327,7 +1331,7 @@ int rundis(Buffer *bin, BasicBlock *blocks, int nblocks, Labels *labels, IList *
 	romstart = 0;
 
 	for(int i = 0; i < nblocks; i++) {
-		if (blocks[i].isdata) datadump(bin, blocks[i].begin, blocks[i].end, addinstr, instrs);
+		if (blocks[i].isdata) datadump(bin, blocks[i].begin, blocks[i].end, addinstr, instrs, -1);
 		else disasm(bin, blocks[i].begin, blocks[i].end, labels, instrs, 0);
 	}
 	return 0;

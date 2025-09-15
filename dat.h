@@ -84,7 +84,7 @@ void appendInstruction(IList *, int addr, Instruction);
 int rundis(Buffer *bin, BasicBlock *blocks, int nblocks, Labels *labels, IList *instrs);
 extern int disasm(Buffer *bin, unsigned long int start, unsigned long int end, Labels *labels, IList *, int justOne);
 extern int disasmone(Buffer *bin, int start, Instruction *retval, Labels *labels);
-int datadump(Buffer *gBuf, uint32_t start, uint32_t end, void (*write)(char *, int addr, void *), void *d);
+int datadump(Buffer *gBuf, uint32_t start, uint32_t end, void (*write)(char *, int addr, void *), void *d, int restrictline);
 
 void findBasicBlocks(Buffer *bin, BasicBlock **out, int *outlen, int **invalid, int *ninvalid);
 int findAddr(int addr, BasicBlock *blocks, int nblocks);

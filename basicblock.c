@@ -39,7 +39,15 @@ int countlines(BasicBlock *blocks, int nblocks) {
 	int lineno = 0;
 	for(int i=0; i < nblocks; i++) {
 		blocks[i].lineno = lineno;
-		if (blocks[i].isdata) lineno += 1; 
+		if (blocks[i].isdata) {
+			int begin = blocks[i].begin, end = blocks[i].end;
+			// first line: always there
+			lineno++;
+			if ((begin & 0xf) != (end & 0xf)) {
+				lineno += (((end+0xf)&~0xf) - ((begin+0xf)&~0xf))/16;
+			}
+		}
+			 
 		else lineno += blocks[i].ninstr;
 	}
 	return lineno;
