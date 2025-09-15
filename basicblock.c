@@ -34,20 +34,22 @@ int findAddr(int addr, BasicBlock *blocks, int nblocks) {
 	return l;
 }
 
+int countlines_n;
+void count(char *s, int addr, void*d) {
+	countlines_n ++;
+}
+
 // Counts lines and fixes up nlines.
-int countlines(BasicBlock *blocks, int nblocks) {
+int countlines(Buffer *bin, BasicBlock *blocks, int nblocks) {
 	int lineno = 0;
 	for(int i=0; i < nblocks; i++) {
 		blocks[i].lineno = lineno;
 		if (blocks[i].isdata) {
-			int begin = blocks[i].begin, end = blocks[i].end;
-			// first line: always there
-			lineno++;
-			if ((begin & 0xf) != (end & 0xf)) {
-				lineno += (((end+0xf)&~0xf) - ((begin+0xf)&~0xf))/16;
-			}
+			countlines_n = 0;
+			datadump(bin, blocks[i].begin, blocks[i].end, count, NULL, -1);
+			lineno += countlines_n;
+			blocks[i].nlines = countlines_n;
 		}
-			 
 		else lineno += blocks[i].ninstr;
 	}
 	return lineno;
@@ -236,8 +238,8 @@ void findBasicBlocks(Buffer *bin, BasicBlock **outblocks, int *nblocks, int **in
 			
 
 	// Count lines
-	// TODO(PAL): This will break when we add data blocks.
-	countlines(blocks, blockCount);
+
+	countlines(bin, blocks, blockCount);
 	// Clean up
 	free(isLeader);
 	free(visited);
