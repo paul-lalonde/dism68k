@@ -119,9 +119,6 @@ void findBasicBlocks(Buffer *bin, int *leaders, int nleaders, BasicBlock **outbl
 		
 		if (inst.isBranch || inst.isJump) {
 			// Target of branch is a leader
-//printf("bin->len = %ld\n", bin->len);
-//printf("addr = 0x%0x\n", addr);
-//printf("inst.targetAddress = %x\n", inst.targetAddress);
 			if (inst.targetAddress < bufferLen(bin)) {
 				isLeader[inst.targetAddress] = true;
 				if (!visited[inst.targetAddress]) {

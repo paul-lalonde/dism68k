@@ -29,7 +29,7 @@ int sectionGetCh(Section *b) {
 	if (b->_curptr + 1 >= b->_bytes + b->_len) {
 		return -1;
 	}
-	return *b->_curptr++;
+	return *(b->_curptr++);
 }
 
 int sectionSeek(Section *b, int offset) {
@@ -64,7 +64,11 @@ int bufferGetCh(Buffer *b) {
 }
 
 int bufferSeek(Buffer *b, int offset) {
-	return sectionSeek(&b->sections[0], offset);
+	for(int s = 0; s < b->len; s++) {
+		if (b->sections[s]._baseaddress <= offset && offset < b->sections[s]._baseaddress + b->sections[s]._len)
+			sectionSeek(&b->sections[s], offset);
+	}
+	return -1;
 }
 
 int bufferLen(Buffer *b /*, int section*/) {
@@ -89,6 +93,7 @@ void bufferAddSection(Buffer *b, int base, int len, char *name) {
 	s->_name = name;
 	s->_len = len;
 	s->_baseaddress = base;
+	s->_curptr = s->_bytes;
 	
 	if (b->len + 1 >= b->cap) {
 		panic("Increase section array size");
@@ -112,6 +117,14 @@ int bufferSectionByName(Buffer *b, char *name) {
 		if (strcmp(name, b->sections[i]._name) == 0) {
 			return i;
 		}
+	}
+	return -1;
+}
+
+int bufferSectionByAddr(Buffer *b, int addr) {
+	for(int s = 0; s < b->len; s++) {
+		if (b->sections[s]._baseaddress <= addr && addr < b->sections[s]._baseaddress + b->sections[s]._len)
+			return s;
 	}
 	return -1;
 }

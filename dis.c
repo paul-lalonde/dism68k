@@ -29,72 +29,72 @@ int hexwidth;
 
 /* This function returns one of the READALL_ constants above.
    If the return value is zero == READALL_OK, then:
-     (*dataptr) points to a dynamically allocated buffer, with
-     (*sizeptr) chars read from the file.
-     The buffer is allocated for one extra char, which is NUL,
-     and automatically appended after the data.
+	 (*dataptr) points to a dynamically allocated buffer, with
+	 (*sizeptr) chars read from the file.
+	 The buffer is allocated for one extra char, which is NUL,
+	 and automatically appended after the data.
    Initial values of (*dataptr) and (*sizeptr) are ignored.
 */
 int readall(FILE *in, Buffer *buf, int loadaddr, char *sectionName)
 {
 	int section = bufferSectionByName(buf, sectionName);
-    unsigned char  *data = buf->sections[section]._bytes, *temp;
-    size_t size = buf->sections[section]._len;
-    size_t used = loadaddr;
-    size_t n;
+	unsigned char  *data = buf->sections[section]._bytes, *temp;
+	size_t size = buf->sections[section]._len;
+	size_t used = loadaddr;
+	size_t n;
 
-    /* None of the parameters can be NULL. */
-    if (in == NULL || buf == NULL)
-        return READALL_INVALID;
+	/* None of the parameters can be NULL. */
+	if (in == NULL || buf == NULL)
+		return READALL_INVALID;
 
-    /* A read error already occurred? */
-    if (ferror(in))
-        return READALL_ERROR;
+	/* A read error already occurred? */
+	if (ferror(in))
+		return READALL_ERROR;
 
-    while (1) {
+	while (1) {
+		if (used + READALL_CHUNK + 1 > size) {
+			size = used + READALL_CHUNK + 1;
 
-        if (used + READALL_CHUNK + 1 > size) {
-            size = used + READALL_CHUNK + 1;
+			/* Overflow check. Some ANSI C compilers
+			   may optimize this away, though. */
+			if (size <= used) {
+				free(data);
+				return READALL_TOOMUCH;
+			}
 
-            /* Overflow check. Some ANSI C compilers
-               may optimize this away, though. */
-            if (size <= used) {
-                free(data);
-                return READALL_TOOMUCH;
-            }
+			temp = realloc(data, size);
+			if (temp == NULL) {
+				free(data);
+				return READALL_NOMEM;
+			}
+			data = temp;
+		}
 
-            temp = realloc(data, size);
-            if (temp == NULL) {
-                free(data);
-                return READALL_NOMEM;
-            }
-            data = temp;
-        }
+		n = fread(data + used, 1, READALL_CHUNK, in);
+		if (n == 0)
+			break;
 
-        n = fread(data + used, 1, READALL_CHUNK, in);
-        if (n == 0)
-            break;
+		used += n;
+	}
 
-        used += n;
-    }
+	if (ferror(in)) {
+		free(data);
+		return READALL_ERROR;
+	}
 
-    if (ferror(in)) {
-        free(data);
-        return READALL_ERROR;
-    }
+	temp = realloc(data, used + 1);
+	if (temp == NULL) {
+		free(data);
+		return READALL_NOMEM;
+	}
+	data = temp;
+	data[used] = '\0';
 
-    temp = realloc(data, used + 1);
-    if (temp == NULL) {
-        free(data);
-        return READALL_NOMEM;
-    }
-    data = temp;
-    data[used] = '\0';
+	buf->sections[section]._bytes = data;
+	buf->sections[section]._len = used;
+	buf->sections[section]._curptr = data;
 
-    buf->sections[section]._bytes = data;
-    buf->sections[section]._len = used;
-
-    return READALL_OK;
+	return READALL_OK;
 }
 
 WINDOW *hex, *diswin, *cmd;
@@ -742,7 +742,7 @@ int main(int argc, char **argv)
 	if (optind < argc) {
 		inbase = argv[optind];
 	}
- 
+ (void)(isboot);
 	char *infilename; asprintf(&infilename, "%s.BIN", inbase);
 	char *labelsname; asprintf(&labelsname,"%s.lbls", inbase);
 	char *disasmname; asprintf(&disasmname, "%s.lst", inbase);
@@ -759,41 +759,38 @@ int main(int argc, char **argv)
 	Buffer *buf = newBuffer();
 	bufferAddSection(buf, 0, 0x20000, "RAM");
 	bufferAddSection(buf, 0xf00000, 0x20000, "ROM");
-/*
-	bufferReserve(buf, 0xf00000 + 0x20000);
-	buf.len = 0xf00000 + 0x20000;
-//	buf.bytes = malloc(buf.len);
-//	memset(buf.bytes, 0, buf.len);
+
 	// Read our file
 	fp = fopen("waldorfwave-boot.BIN", "r");
 	if (fp == NULL) {
 		fprintf(stderr, "Could not open file\n");
 		exit(-1);
 	}
-	readall(fp, &buf.bytes, &buf.len, 0xf0000);
+	readall(fp, buf, 0, "ROM");
 	fclose(fp);
-*/
+
 	fp = fopen("W2SYS.BIN", "r");
 	if (fp == NULL) {
 		fprintf(stderr, "Could not open file\n");
 		exit(-1);
 	}
-	readall(fp, buf, 0, "RAM"); // base at 0, section 0
+	readall(fp, buf, 0x1000, "RAM"); // base at 0x1000, section 0
 	fclose(fp);
 	bufferSeek(buf, 0);
 
 	int *leaders = NULL;
 	int nleaders = 0;
-	if (isboot) {
-		leaders = malloc(sizeof(int));
-		leaders[0] = bufferGetAt(buf, 0xf00004);
-		leaders[0] = (leaders[0] << 8) | bufferGetAt(buf, 0xf00005);
-		leaders[0] = (leaders[0] << 8) | bufferGetAt(buf, 0xf00006);
-		leaders[0] = (leaders[0] << 8) | bufferGetAt(buf, 0xf00007);
-		nleaders = 1;
+	leaders = malloc(sizeof(int)*2);
+	leaders[0] = bufferGetAt(buf, 0xf00004);
+	leaders[0] = (leaders[0] << 8) | bufferGetAt(buf, 0xf00005);
+	leaders[0] = (leaders[0] << 8) | bufferGetAt(buf, 0xf00006);
+	leaders[0] = (leaders[0] << 8) | bufferGetAt(buf, 0xf00007);
+	nleaders = 1;
+	leaders[1] = 0x1000;
+	nleaders++;
+
 		// Waldorf sets some high bits on ROM addresses.  
-	}
-	
+		
 
 	// Calculate basic blocks
 	BasicBlock *blocks=0;
