@@ -30,6 +30,9 @@ int bufferIsEOF(Buffer *b);
 int bufferIsEOS(Buffer *b); // End of Section
 void bufferAddSection(Buffer *b, int base, int len, char *name);
 
+// don't cache these: the indices change when sections are added.
+int bufferSectionByName(Buffer *b, char *name);
+
 #define MAXLABELLEN 64
 struct Label {
 	char *name;

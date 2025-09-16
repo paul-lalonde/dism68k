@@ -105,6 +105,13 @@ void bufferAddSection(Buffer *b, int base, int len, char *name) {
 	}
 	b->sections[i] = *s;
 	b->len++;
-	
-	fprintf(stderr, "unimplemented: bufferAddSection\n");
+}
+
+int bufferSectionByName(Buffer *b, char *name) {
+	for(int i=0; i < b->len; i++) {
+		if (strcmp(name, b->sections[i]._name) == 0) {
+			return i;
+		}
+	}
+	return -1;
 }

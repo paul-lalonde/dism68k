@@ -35,8 +35,9 @@ int hexwidth;
      and automatically appended after the data.
    Initial values of (*dataptr) and (*sizeptr) are ignored.
 */
-int readall(FILE *in, Buffer *buf, int loadaddr, int section)
+int readall(FILE *in, Buffer *buf, int loadaddr, char *sectionName)
 {
+	int section = bufferSectionByName(buf, sectionName);
     unsigned char  *data = buf->sections[section]._bytes, *temp;
     size_t size = buf->sections[section]._len;
     size_t used = loadaddr;
@@ -757,6 +758,7 @@ int main(int argc, char **argv)
 
 	Buffer *buf = newBuffer();
 	bufferAddSection(buf, 0, 0x20000, "RAM");
+	bufferAddSection(buf, 0xf00000, 0x20000, "ROM");
 /*
 	bufferReserve(buf, 0xf00000 + 0x20000);
 	buf.len = 0xf00000 + 0x20000;
@@ -776,7 +778,7 @@ int main(int argc, char **argv)
 		fprintf(stderr, "Could not open file\n");
 		exit(-1);
 	}
-	readall(fp, buf, 0, 0); // base at 0, section 0
+	readall(fp, buf, 0, "RAM"); // base at 0, section 0
 	fclose(fp);
 	bufferSeek(buf, 0);
 
