@@ -43,7 +43,8 @@ int sectionLen(Section *b) {
 	return b->_len;
 }
 
-int sectionGetAt(Section *b, int pos) {
+// Relative to start of section.
+int sectionGetAt(Section *b, int pos) { 
 	return b->_bytes[pos];
 }
 
@@ -78,7 +79,7 @@ int bufferLen(Buffer *b /*, int section*/) {
 int bufferGetAt(Buffer *b, int offset) {
 	for(int s = 0; s < b->len; s++) {
 		if (b->sections[s]._baseaddress <= offset && offset < b->sections[s]._baseaddress + b->sections[s]._len)
-			return sectionGetCh(&b->sections[s]);
+			return sectionGetAt(&b->sections[s], offset-b->sections[s]._baseaddress);
 	}
 	panic("bufferGetAt offset %d not mapped\n", offset);
 	return -1;
@@ -127,4 +128,16 @@ int bufferSectionByAddr(Buffer *b, int addr) {
 			return s;
 	}
 	return -1;
+}
+
+int bufferIsMappedAddress(Buffer *b, int addr) {
+	for(int s = 0; s < b->len; s++) {
+		if (b->sections[s]._baseaddress <= addr && addr < b->sections[s]._baseaddress + b->sections[s]._len)
+			return 1;
+	}
+	return 0;
+}
+
+int bufferEndAddress(Buffer *b) {
+	return b->sections[b->len-1]._baseaddress + b->sections[b->len-1]._len;
 }

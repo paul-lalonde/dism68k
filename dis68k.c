@@ -1237,7 +1237,7 @@ int disasm(Buffer *buf, unsigned long int start, unsigned long int end, Labels *
 			instr.instr = strdup(opcode_s);
 			if (instr.asm) free(instr.asm);
 			asprintf(&instr.asm, "%-8s %s", opcode_s, operand_s);
-			instr.nbytes = (bufferSeek(buf, -1)) - instr.address;
+			instr.nbytes = address - instr.address;
 			gBufprintf("%-8s %s\n", opcode_s, operand_s);
 			appendInstruction(output, instr.address, instr);
 		} else {
@@ -1253,7 +1253,7 @@ int disasm(Buffer *buf, unsigned long int start, unsigned long int end, Labels *
 int disasmone(Buffer *buf, int start, Instruction *retval, Labels *labels) {
 	Instruction inst[2];
 	IList output = {.instrs = inst, .len=0, .cap=2}; // Should never realloc.
-	if ( disasm(buf, start, bufferLen(buf), labels, &output, 1) ) {
+	if ( disasm(buf, start, bufferEndAddress(buf), labels, &output, 1) ) {
 		*retval = inst[0];
 		return 1;
 	}

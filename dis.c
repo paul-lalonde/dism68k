@@ -40,7 +40,7 @@ int readall(FILE *in, Buffer *buf, int loadaddr, char *sectionName)
 	int section = bufferSectionByName(buf, sectionName);
 	unsigned char  *data = buf->sections[section]._bytes, *temp;
 	size_t size = buf->sections[section]._len;
-	size_t used = loadaddr;
+	size_t used = loadaddr - buf->sections[section]._baseaddress;
 	size_t n;
 
 	/* None of the parameters can be NULL. */
@@ -720,6 +720,7 @@ void generateLabels(Labels *l, BasicBlock *blocks, int nblocks) {
 
 void myfprint(char *s, int addr, void *d) {
 	FILE *fp = (FILE *)d;
+	fprintf(fp, "%06x", addr);
 	for(int i=0;i<ntab;i++) fprintf(fp,"\t");
 	fprintf(fp, "%s", s);
 	ntab = 4; // Cheesy "use fewer tabs on each start"
@@ -766,7 +767,7 @@ int main(int argc, char **argv)
 		fprintf(stderr, "Could not open file\n");
 		exit(-1);
 	}
-	readall(fp, buf, 0, "ROM");
+	readall(fp, buf, 0xf00000, "ROM");
 	fclose(fp);
 
 	fp = fopen("W2SYS.BIN", "r");
@@ -780,13 +781,15 @@ int main(int argc, char **argv)
 
 	int *leaders = NULL;
 	int nleaders = 0;
-	leaders = malloc(sizeof(int)*2);
-	leaders[0] = bufferGetAt(buf, 0xf00004);
-	leaders[0] = (leaders[0] << 8) | bufferGetAt(buf, 0xf00005);
-	leaders[0] = (leaders[0] << 8) | bufferGetAt(buf, 0xf00006);
-	leaders[0] = (leaders[0] << 8) | bufferGetAt(buf, 0xf00007);
-	nleaders = 1;
-	leaders[1] = 0x1000;
+	leaders = malloc(sizeof(int)*3);
+	leaders[nleaders] = bufferGetAt(buf, 0xf00004);
+	leaders[nleaders] = (leaders[nleaders] << 8) | bufferGetAt(buf, 0xf00005);
+	leaders[nleaders] = (leaders[nleaders] << 8) | bufferGetAt(buf, 0xf00006);
+	leaders[nleaders] = (leaders[nleaders] << 8) | bufferGetAt(buf, 0xf00007);
+	nleaders++;;
+	leaders[nleaders] = 0x1000;
+	nleaders++;
+	leaders[nleaders] = 0x3b634;
 	nleaders++;
 
 		// Waldorf sets some high bits on ROM addresses.  
@@ -801,7 +804,7 @@ int main(int argc, char **argv)
 	FILE *outfile = fopen(disasmname, "w");
 	Instruction instr;
 	int l;
-	for(int i = 0; i < 3; i++) {
+	for(int i = 0; i < nblocks; i++) {
 		char str[128];
 		sprintf(str, "\t# Block %d:%06x-%06x: line %d", i, blocks[i].begin, blocks[i].end, blocks[i].lineno); 
 		for(int addr = blocks[i].begin; addr < blocks[i].end; ) {

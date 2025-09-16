@@ -29,9 +29,11 @@ int bufferGetAt(Buffer *b, int offset);
 int bufferIsEOF(Buffer *b);
 int bufferIsEOS(Buffer *b); // End of Section
 void bufferAddSection(Buffer *b, int base, int len, char *name);
-
+void bufferIsMappedAddr(Buffer *b, int addr); // Check that addr is in a segment.
 // don't cache these: the indices change when sections are added.
 int bufferSectionByName(Buffer *b, char *name);
+int bufferSectionByAddr(Buffer *b, int addr);
+int bufferEndAddress(Buffer *b); // Return the end (size) of the whole address space.
 
 #define MAXLABELLEN 64
 struct Label {

@@ -63,20 +63,22 @@ void findBasicBlocks(Buffer *bin, int *leaders, int nleaders, BasicBlock **outbl
 	int *invalidAddrs = NULL;
 	int invalidCount = 0;
 	int invalidCapacity = 0;
+
+	int endAddr = bufferEndAddress(bin);
 	
 	// Track which addresses are block leaders
-	bool *isLeader = (bool*)calloc(bufferLen(bin), sizeof(bool));
+	bool *isLeader = (bool*)calloc(endAddr, sizeof(bool));
 	if (!isLeader) return;
 	
 	// Track visited addresses to avoid infinite loops
-	bool *visited = (bool*)calloc(bufferLen(bin), sizeof(bool));
+	bool *visited = (bool*)calloc(endAddr, sizeof(bool));
 	if (!visited) {
 		free(isLeader);
 		return;
 	}
 	
 	// Stack for addresses to process
-	int *stack = (int*)malloc(bufferLen(bin) * sizeof(int));
+	int *stack = (int*)malloc(endAddr * sizeof(int));
 	if (!stack) {
 		free(isLeader);
 		free(visited);
@@ -98,8 +100,7 @@ void findBasicBlocks(Buffer *bin, int *leaders, int nleaders, BasicBlock **outbl
 	// First pass: find all reachable code and mark leaders
 	while (stackTop > 0) {
 		int addr = stack[--stackTop];
-		
-		if (addr >= bufferLen(bin) || visited[addr]) continue;
+		if (addr >= endAddr || visited[addr]) continue;
 		Labels labels = {.len = 0};
 		struct Instruction inst;
 		if (!disasmone(bin, addr, &inst, &labels)) {
@@ -119,17 +120,23 @@ void findBasicBlocks(Buffer *bin, int *leaders, int nleaders, BasicBlock **outbl
 		
 		if (inst.isBranch || inst.isJump) {
 			// Target of branch is a leader
-			if (inst.targetAddress < bufferLen(bin)) {
+			if (inst.targetAddress < endAddr) {
 				isLeader[inst.targetAddress] = true;
 				if (!visited[inst.targetAddress]) {
+	if (inst.targetAddress == -1) {
+		(void)(nextAddr);
+	}
 					stack[stackTop++] = inst.targetAddress;
 				}
 			}
 			
 			// Instruction after branch is a leader (for conditional branches)
-			if (inst.isBranch && (nextAddr < bufferLen(bin))) {
+			if (inst.isBranch && (nextAddr < endAddr)) {
 				isLeader[nextAddr] = true;
 				if (!visited[nextAddr]) {
+	if (nextAddr == -1) {
+		(void)(nextAddr);
+	}
 					stack[stackTop++] = nextAddr;
 				}
 			}
@@ -137,8 +144,11 @@ void findBasicBlocks(Buffer *bin, int *leaders, int nleaders, BasicBlock **outbl
 			// Don't follow after return
 		} else {
 			// Continue to next instruction
-			if (nextAddr < bufferLen(bin)) {
+			if (nextAddr < endAddr) {
 				if (!visited[nextAddr]) {
+	if (nextAddr == -1) {
+		(void)(nextAddr);
+	}
 					stack[stackTop++] = nextAddr;
 				}
 			}
@@ -146,7 +156,7 @@ void findBasicBlocks(Buffer *bin, int *leaders, int nleaders, BasicBlock **outbl
 	}
 	
 	// Second pass: build basic blocks
-	for (int addr = 0; addr < bufferLen(bin); addr++) {
+	for (int addr = 0; addr < endAddr; addr++) {
 		if (!isLeader[addr] || !visited[addr]) continue;
 		
 		int blockStart = addr;
@@ -154,7 +164,7 @@ void findBasicBlocks(Buffer *bin, int *leaders, int nleaders, BasicBlock **outbl
 		int ninstr = 0;
 
 		// Find end of basic block
-		while (currentAddr < bufferLen(bin) && visited[currentAddr]) {
+		while (currentAddr < endAddr && visited[currentAddr]) {
 			struct Instruction inst;
 			Labels labels = {.len = 0};
 			if (!disasmone(bin, currentAddr, &inst, &labels)) {
@@ -168,8 +178,8 @@ void findBasicBlocks(Buffer *bin, int *leaders, int nleaders, BasicBlock **outbl
 			// 1. Next instruction is a leader
 			// 2. This is a branch or return
 			// 3. We reach end of binary
-			if (nextAddr >= bufferLen(bin) || 
-				(nextAddr < bufferLen(bin) && isLeader[nextAddr]) ||
+			if (nextAddr >= endAddr || 
+				(nextAddr < endAddr && isLeader[nextAddr]) ||
 				inst.isBranch || inst.isJump || inst.isRet) {
 				
 				// Add block
