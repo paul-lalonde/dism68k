@@ -5,20 +5,30 @@ typedef struct Instruction Instruction;
 typedef struct Label Label;
 typedef struct Labels Labels;
 typedef struct Program Program;
+typedef struct Section Section;
 
-struct Buffer {
+struct Section {
 	unsigned char *_bytes;
 	size_t _len;
 	unsigned char *_curptr;
+	char *_name;
+	int _baseaddress;
+};
+
+struct Buffer {
+	Section *sections;
+	int len;
+	int cap;
 };
 
 Buffer *newBuffer(void);
-Buffer *bufferReserve(Buffer *b, int len);
 int bufferGetCh(Buffer *b);
-int bufferSeek(Buffer *b, int offset);
+int bufferSeek(Buffer *b, int offset); // Negative offset returns current.
 int bufferLen(Buffer *b);
 int bufferGetAt(Buffer *b, int offset);
 int bufferIsEOF(Buffer *b);
+int bufferIsEOS(Buffer *b); // End of Section
+void bufferAddSection(Buffer *b, int base, int len, char *name);
 
 #define MAXLABELLEN 64
 struct Label {
@@ -107,3 +117,5 @@ void findBasicBlocks(Buffer *bin, int *leaders, int nleaders, BasicBlock **out, 
 int findAddr(int addr, BasicBlock *blocks, int nblocks);
 int findBBbyline(BasicBlock *blocks, int nblocks, int line);
 int linetoaddr(Buffer *bin, BasicBlock *blocks, int nblocks, int line);
+
+void panic(char *s, ...);

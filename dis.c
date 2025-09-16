@@ -7,6 +7,7 @@
 #include <ncurses.h>
 #include <errno.h>
 #include <unistd.h>
+#include <setjmp.h>
 #include "dat.h"
 
 #define ROWWIDTH 16 // Hex displays 16 bytes per row.  Suck it.
@@ -34,10 +35,10 @@ int hexwidth;
      and automatically appended after the data.
    Initial values of (*dataptr) and (*sizeptr) are ignored.
 */
-int readall(FILE *in, Buffer *buf, int loadaddr)
+int readall(FILE *in, Buffer *buf, int loadaddr, int section)
 {
-    unsigned char  *data = buf->_bytes, *temp;
-    size_t size = buf->_len;
+    unsigned char  *data = buf->sections[section]._bytes, *temp;
+    size_t size = buf->sections[section]._len;
     size_t used = loadaddr;
     size_t n;
 
@@ -89,8 +90,8 @@ int readall(FILE *in, Buffer *buf, int loadaddr)
     data = temp;
     data[used] = '\0';
 
-    buf->_bytes = data;
-    buf->_len = used;
+    buf->sections[section]._bytes = data;
+    buf->sections[section]._len = used;
 
     return READALL_OK;
 }
@@ -723,6 +724,8 @@ void myfprint(char *s, int addr, void *d) {
 	ntab = 4; // Cheesy "use fewer tabs on each start"
 }
 
+jmp_buf bailout;
+
 int main(int argc, char **argv)
 {	
 	char *inbase = "W2SYS";
@@ -753,7 +756,7 @@ int main(int argc, char **argv)
 
 
 	Buffer *buf = newBuffer();
-
+	bufferAddSection(buf, 0, 0x20000, "RAM");
 /*
 	bufferReserve(buf, 0xf00000 + 0x20000);
 	buf.len = 0xf00000 + 0x20000;
@@ -773,7 +776,7 @@ int main(int argc, char **argv)
 		fprintf(stderr, "Could not open file\n");
 		exit(-1);
 	}
-	readall(fp, buf, 0);
+	readall(fp, buf, 0, 0); // base at 0, section 0
 	fclose(fp);
 	bufferSeek(buf, 0);
 
@@ -824,8 +827,19 @@ int main(int argc, char **argv)
 	fclose(outfile);
 	
 	bufferSeek(buf, 0);
-	interact(buf, labels, blocks, nblocks);
+
+	if (!setjmp(bailout))
+		interact(buf, labels, blocks, nblocks);
 
 	endwin();			/* End curses mode		  */
 	return 0;
+}
+
+void panic(char *s, ...) {
+	va_list args;
+ 	va_start (args, s);
+  	vfprintf (stderr, s, args);
+	va_end (args);
+
+	longjmp(bailout, 1);
 }
