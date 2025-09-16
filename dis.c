@@ -34,15 +34,15 @@ int hexwidth;
      and automatically appended after the data.
    Initial values of (*dataptr) and (*sizeptr) are ignored.
 */
-int readall(FILE *in, unsigned char **dataptr, size_t *sizeptr, int loadaddr)
+int readall(FILE *in, Buffer *buf, int loadaddr)
 {
-    unsigned char  *data = *dataptr, *temp;
-    size_t size = *sizeptr;
+    unsigned char  *data = buf->_bytes, *temp;
+    size_t size = buf->_len;
     size_t used = loadaddr;
     size_t n;
 
     /* None of the parameters can be NULL. */
-    if (in == NULL || dataptr == NULL || sizeptr == NULL)
+    if (in == NULL || buf == NULL)
         return READALL_INVALID;
 
     /* A read error already occurred? */
@@ -89,8 +89,8 @@ int readall(FILE *in, unsigned char **dataptr, size_t *sizeptr, int loadaddr)
     data = temp;
     data[used] = '\0';
 
-    *dataptr = data;
-    *sizeptr = used;
+    buf->_bytes = data;
+    buf->_len = used;
 
     return READALL_OK;
 }
@@ -115,7 +115,7 @@ void Unimplemented(char *s) {
 }
 
 // Fill 
-void fill(unsigned char *buf, int len, int pos, int top, int bottom, attr_t attrs, int addrcolor, int fillcolor) {
+void fill(Buffer *buf, int pos, int top, int bottom, attr_t attrs, int addrcolor, int fillcolor) {
 	attr_t oattrs;
 	short color;
 	scrollok(hex, 0);
@@ -125,10 +125,10 @@ void fill(unsigned char *buf, int len, int pos, int top, int bottom, attr_t attr
 		mvwprintw(hex, i, 0, "%08x: ", pos);
 		for (int j = 0; j < ROWWIDTH/2; j++) {
 			wattr_set(hex, attrs, fillcolor, NULL);
-			wprintw(hex, "%02x", buf[pos++]);
-			if (pos >= len) { goto outofdata; }
-			wprintw(hex, "%02x ", buf[pos++]);
-			if (pos >= len) { goto outofdata; }
+			wprintw(hex, "%02x", bufferGetAt(buf, pos++));
+			if (pos >= bufferLen(buf)) { goto outofdata; }
+			wprintw(hex, "%02x ", bufferGetAt(buf, pos++));
+			if (pos >= bufferLen(buf)) { goto outofdata; }
 			if (j & 1) wprintw(hex, " "); 
 		}
 	}
@@ -267,12 +267,12 @@ void hexmoveselection(int oldpos, int pos) {
 		state.windowoffset -= nlines * ROWWIDTH;
 		// We now have to fill lines between oldoffset and pos.
 		if (nlines > hy) nlines = hy;
-		fill(state.buf->bytes, state.buf->len, state.windowoffset, 0, nlines, 0, NORMALMODE, color);
+		fill(state.buf, state.windowoffset, 0, nlines, 0, NORMALMODE, color);
 	} else if (r >= hy) {
 		int nlines = r - hy + 1; 
 		wscrl(hex, nlines);
 		state.windowoffset += nlines * ROWWIDTH;
-		fill(state.buf->bytes, state.buf->len, state.windowoffset + (hy-nlines)*ROWWIDTH, hy-nlines, hy, 0, NORMALMODE, color);
+		fill(state.buf, state.windowoffset + (hy-nlines)*ROWWIDTH, hy-nlines, hy, 0, NORMALMODE, color);
 	}
 	
 	hexstandout(pos, 1);
@@ -484,13 +484,13 @@ void interact(Buffer *buf, Labels *labels, BasicBlock *blocks, int nblocks) {
 
 	refilldis(buf, state.lineAddresses[0], blocks, nblocks, labels);
 	wrefresh(diswin);
-	wprintw(cmd, ":read %d bytes", buf->len);
+	wprintw(cmd, ":read %d bytes", bufferLen(buf));
 	wmove(cmd, 0, 0);
 	wrefresh(cmd);
 
 	// Fill the first screen
 	attron(COLOR_PAIR(NORMALMODE));
-	fill(buf->bytes, buf->len, 0, 0, LINES, 0, NORMALMODE, NORMALMODE);
+	fill(buf, 0, 0, LINES, 0, NORMALMODE, NORMALMODE);
 	
 	hexmoveselection(0,0);
 
@@ -577,7 +577,7 @@ void interact(Buffer *buf, Labels *labels, BasicBlock *blocks, int nblocks) {
 				oldline = state.line;
 				oldoffset = state.offset;
 				state.offset = repeats;
-				if (state.offset > state.buf->len) state.offset = state.buf->len;
+				if (state.offset > bufferLen(state.buf)) state.offset = bufferLen(state.buf);
 				hexmoveselection(oldoffset, state.offset);
 				int line = offsetToLine(&state, state.offset);
 				int r = line - state.topline;
@@ -594,7 +594,7 @@ void interact(Buffer *buf, Labels *labels, BasicBlock *blocks, int nblocks) {
 				oldoffset = state.offset;
 				if (hascount==0) repeats = state.buf->len-1;
 				state.offset = repeats;
-				if (state.offset > state.buf->len) state.offset = state.buf->len;
+				if (state.offset > bufferLen(state.buf)) state.offset = bufferLen(state.buf);
 				hexmoveselection(oldoffset, state.offset);
 				break;
 */
@@ -642,7 +642,7 @@ void interact(Buffer *buf, Labels *labels, BasicBlock *blocks, int nblocks) {
 		case 'j':
 				oldoffset = state.offset;
 				state.offset+=repeats*ROWWIDTH;
-				if (state.offset > state.buf->len) state.offset = state.buf->len;
+				if (state.offset > bufferLen(state.buf)) state.offset = bufferLen(state.buf);
 				hexmoveselection(oldoffset, state.offset);
 				break;
 		case 'k':
@@ -654,7 +654,7 @@ void interact(Buffer *buf, Labels *labels, BasicBlock *blocks, int nblocks) {
 		case 'l':
 				oldoffset = state.offset;
 				state.offset+= 2*repeats;
-				if (state.offset > state.buf->len) state.offset = state.buf->len;
+				if (state.offset > bufferLen(state.buf)) state.offset = bufferLen(state.buf);
 				hexmoveselection(oldoffset, state.offset);
 				break;
 		}
@@ -752,9 +752,10 @@ int main(int argc, char **argv)
 	}
 
 
-	Buffer buf;
-	memset(&buf, 0, sizeof(buf));
+	Buffer *buf = newBuffer();
+
 /*
+	bufferReserve(buf, 0xf00000 + 0x20000);
 	buf.len = 0xf00000 + 0x20000;
 //	buf.bytes = malloc(buf.len);
 //	memset(buf.bytes, 0, buf.len);
@@ -772,18 +773,18 @@ int main(int argc, char **argv)
 		fprintf(stderr, "Could not open file\n");
 		exit(-1);
 	}
-	readall(fp, &buf.bytes, &buf.len, 0);
+	readall(fp, buf, 0);
 	fclose(fp);
-	buf.curptr = buf.bytes;
+	bufferSeek(buf, 0);
 
 	int *leaders = NULL;
 	int nleaders = 0;
 	if (isboot) {
 		leaders = malloc(sizeof(int));
-		leaders[0] = buf.bytes[0xf00004];
-		leaders[0] = (leaders[0] << 8) | buf.bytes[0xf00005];
-		leaders[0] = (leaders[0] << 8) | buf.bytes[0xf00006];
-		leaders[0] = (leaders[0] << 8) | buf.bytes[0xf00007];
+		leaders[0] = bufferGetAt(buf, 0xf00004);
+		leaders[0] = (leaders[0] << 8) | bufferGetAt(buf, 0xf00005);
+		leaders[0] = (leaders[0] << 8) | bufferGetAt(buf, 0xf00006);
+		leaders[0] = (leaders[0] << 8) | bufferGetAt(buf, 0xf00007);
 		nleaders = 1;
 		// Waldorf sets some high bits on ROM addresses.  
 	}
@@ -792,7 +793,7 @@ int main(int argc, char **argv)
 	// Calculate basic blocks
 	BasicBlock *blocks=0;
 	int nblocks, *invalid, ninvalid;
-	findBasicBlocks(&buf, leaders, nleaders, &blocks, &nblocks, &invalid, &ninvalid);
+	findBasicBlocks(buf, leaders, nleaders, &blocks, &nblocks, &invalid, &ninvalid);
 	generateLabels(labels, blocks, nblocks);
 	
 	FILE *outfile = fopen(disasmname, "w");
@@ -810,11 +811,11 @@ int main(int argc, char **argv)
 			}
 			if (blocks[i].isdata) {
 				if (addr == blocks[i].begin) ntab = 2;
-				datadump(&buf, blocks[i].begin, blocks[i].end, myfprint, outfile, -1);
+				datadump(buf, blocks[i].begin, blocks[i].end, myfprint, outfile, -1);
 				addr = blocks[i].end;
 				continue;
 			}
-			disasmone(&buf, addr, &instr, state.labels);
+			disasmone(buf, addr, &instr, state.labels);
 			fprintf(outfile, "\t\t%s%s\n", instr.asm, str);
 			str[0] = 0;
 			addr += instr.nbytes;
@@ -822,8 +823,8 @@ int main(int argc, char **argv)
 	}
 	fclose(outfile);
 	
-	buf.curptr = buf.bytes;
-	interact(&buf, labels, blocks, nblocks);
+	bufferSeek(buf, 0);
+	interact(buf, labels, blocks, nblocks);
 
 	endwin();			/* End curses mode		  */
 	return 0;

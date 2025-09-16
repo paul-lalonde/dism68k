@@ -7,10 +7,18 @@ typedef struct Labels Labels;
 typedef struct Program Program;
 
 struct Buffer {
-	unsigned char *bytes;
-	size_t len;
-	unsigned char *curptr;
+	unsigned char *_bytes;
+	size_t _len;
+	unsigned char *_curptr;
 };
+
+Buffer *newBuffer(void);
+Buffer *bufferReserve(Buffer *b, int len);
+int bufferGetCh(Buffer *b);
+int bufferSeek(Buffer *b, int offset);
+int bufferLen(Buffer *b);
+int bufferGetAt(Buffer *b, int offset);
+int bufferIsEOF(Buffer *b);
 
 #define MAXLABELLEN 64
 struct Label {

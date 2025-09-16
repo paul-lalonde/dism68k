@@ -1,10 +1,11 @@
 CC = gcc
 CFLAGS = -g -std=c99 -pedantic -Wall
-OBJECTS = dis.o dis68k.o label.o basicblock.o
+OBJECTS = dis.o dis68k.o label.o basicblock.o buffer.o
 
 all: dis
 
-label.o: label.c
+%.o: %.c dat.h
+	$(CC) $(CFLAGS) -c $< -o $@
 
 dis.o: dis.c
 	$(CC) $(CFLAGS) -c dis.c
