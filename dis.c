@@ -34,11 +34,11 @@ int hexwidth;
      and automatically appended after the data.
    Initial values of (*dataptr) and (*sizeptr) are ignored.
 */
-int readall(FILE *in, unsigned char **dataptr, size_t *sizeptr)
+int readall(FILE *in, unsigned char **dataptr, size_t *sizeptr, int loadaddr)
 {
-    unsigned char  *data = NULL, *temp;
-    size_t size = 0;
-    size_t used = 0;
+    unsigned char  *data = *dataptr, *temp;
+    size_t size = *sizeptr;
+    size_t used = loadaddr;
     size_t n;
 
     /* None of the parameters can be NULL. */
@@ -392,6 +392,11 @@ void markasdata(int begin, int end) {
 	Unimplemented("markasdata");
 }
 
+int search(char *s) {
+	(void)(s);
+	return state.offset;
+}
+
 int exec(char *s) {
 	// This should really be a little language, like ed.
 	// <range><cmd>/<param>/  
@@ -545,9 +550,6 @@ void interact(Buffer *buf, Labels *labels, BasicBlock *blocks, int nblocks) {
 		// common mode
 		int handled = 1;
 		switch(ch) {
-		case '/': // Search
-				Unimplemented("Search");
-				break;
 		case ':':
 				{
 				char buf[128];
@@ -560,6 +562,17 @@ void interact(Buffer *buf, Labels *labels, BasicBlock *blocks, int nblocks) {
 				Message("Command: %s", buf);
 				}
 				break;
+		case '/': // Search
+				{
+				char buf[128];
+				nodelay(cmd, FALSE);
+				echo();
+				mvwaddch(cmd, 0,0, ':');
+				mvwgetnstr(cmd, 0,1, buf, 128);
+				noecho();
+				repeats = search(buf);
+				}
+				/* FALLTHROUGH */
 		case 'g':
 				oldline = state.line;
 				oldoffset = state.offset;
@@ -710,40 +723,82 @@ void myfprint(char *s, int addr, void *d) {
 	ntab = 4; // Cheesy "use fewer tabs on each start"
 }
 
-int main(void)
-{	// yes, we need command line parsing now.
-
+int main(int argc, char **argv)
+{	
+	char *inbase = "W2SYS";
+	int opt;
+	int isboot=0;
+	while ((opt = getopt(argc, argv, "b")) != -1) {
+		switch(opt) {
+		case 'b':
+			isboot = true;
+			break;
+		}
+	}
+	if (optind < argc) {
+		inbase = argv[optind];
+	}
+ 
+	char *infilename; asprintf(&infilename, "%s.BIN", inbase);
+	char *labelsname; asprintf(&labelsname,"%s.lbls", inbase);
+	char *disasmname; asprintf(&disasmname, "%s.lst", inbase);
 	//kill(getpid(), SIGSTOP);
 	Labels *labels = newLabels(1);
 	state.labels = labels;
-	FILE *fp = fopen("labels.txt", "r");
+	FILE *fp = fopen(labelsname, "r");
 	if (fp != NULL) {
 		freadLabels(fp, labels);
 		fclose(fp);
 	}
 
+
+	Buffer buf;
+	memset(&buf, 0, sizeof(buf));
+/*
+	buf.len = 0xf00000 + 0x20000;
+//	buf.bytes = malloc(buf.len);
+//	memset(buf.bytes, 0, buf.len);
 	// Read our file
+	fp = fopen("waldorfwave-boot.BIN", "r");
+	if (fp == NULL) {
+		fprintf(stderr, "Could not open file\n");
+		exit(-1);
+	}
+	readall(fp, &buf.bytes, &buf.len, 0xf0000);
+	fclose(fp);
+*/
 	fp = fopen("W2SYS.BIN", "r");
 	if (fp == NULL) {
 		fprintf(stderr, "Could not open file\n");
 		exit(-1);
 	}
-	Buffer buf;
-
-	readall(fp, &buf.bytes, &buf.len);
+	readall(fp, &buf.bytes, &buf.len, 0);
 	fclose(fp);
 	buf.curptr = buf.bytes;
+
+	int *leaders = NULL;
+	int nleaders = 0;
+	if (isboot) {
+		leaders = malloc(sizeof(int));
+		leaders[0] = buf.bytes[0xf00004];
+		leaders[0] = (leaders[0] << 8) | buf.bytes[0xf00005];
+		leaders[0] = (leaders[0] << 8) | buf.bytes[0xf00006];
+		leaders[0] = (leaders[0] << 8) | buf.bytes[0xf00007];
+		nleaders = 1;
+		// Waldorf sets some high bits on ROM addresses.  
+	}
+	
 
 	// Calculate basic blocks
 	BasicBlock *blocks=0;
 	int nblocks, *invalid, ninvalid;
-	findBasicBlocks(&buf, &blocks, &nblocks, &invalid, &ninvalid);
+	findBasicBlocks(&buf, leaders, nleaders, &blocks, &nblocks, &invalid, &ninvalid);
 	generateLabels(labels, blocks, nblocks);
 	
-	FILE *outfile = fopen("disasm.txt", "w");
+	FILE *outfile = fopen(disasmname, "w");
 	Instruction instr;
 	int l;
-	for(int i = 0; i < nblocks; i++) {
+	for(int i = 0; i < 3; i++) {
 		char str[128];
 		sprintf(str, "\t# Block %d:%06x-%06x: line %d", i, blocks[i].begin, blocks[i].end, blocks[i].lineno); 
 		for(int addr = blocks[i].begin; addr < blocks[i].end; ) {

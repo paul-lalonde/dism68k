@@ -55,7 +55,7 @@ int countlines(Buffer *bin, BasicBlock *blocks, int nblocks) {
 	return lineno;
 }
 
-void findBasicBlocks(Buffer *bin, BasicBlock **outblocks, int *nblocks, int **invalid, int *ninvalid) {
+void findBasicBlocks(Buffer *bin, int *leaders, int nleaders, BasicBlock **outblocks, int *nblocks, int **invalid, int *ninvalid) {
 	BasicBlock *blocks = NULL;
 	int blockCount = 0;
 	int blockCapacity = 0;
@@ -84,9 +84,16 @@ void findBasicBlocks(Buffer *bin, BasicBlock **outblocks, int *nblocks, int **in
 	}
 	int stackTop = 0;
 	
-	// Start at address 0
-	isLeader[0] = true;
-	stack[stackTop++] = 0;
+	if (leaders == NULL)  {
+		// Start at address 0
+		isLeader[0] = true;
+		stack[stackTop++] = 0;
+	} else {
+		for(int i = 0; i < nleaders; i++) {
+			isLeader[leaders[i]] = true;
+			stack[stackTop++] = leaders[i];
+		}
+	}
 	
 	// First pass: find all reachable code and mark leaders
 	while (stackTop > 0) {
