@@ -171,7 +171,7 @@ bool readmap(const char *filename) {
 */
 unsigned int getbyte(Buffer *b) {
 	const int byte = bufferGetCh(b);
-	if (bufferIsEOF(b)) {
+	if (bufferIsEOF(b, address)) {
 		fprintf(stderr, "Unexpected end of input\n");
 		exit(EXIT_FAILURE);
 	}
@@ -189,7 +189,7 @@ int getword(Buffer *b) {
 	int word = bufferGetCh(b) << 8;
 	word |= bufferGetCh(b);
 
-	if (bufferIsEOF(b)) {
+	if (bufferIsEOF(b, address)) {
 		fprintf(stderr, "Unexpected end of input\n");
 		exit(EXIT_FAILURE);
 	}
@@ -264,13 +264,24 @@ void sprintmode(Buffer *gBuf, Labels *lbls, unsigned int mode, unsigned int reg,
 		} break;
 		case 7  : {
 			const int data1 = getword(gBuf);
-			sprintf(out_s, "$0000%04x", data1);
+			//sprintf(out_s, "$0000%04x", data1);
+			int l;
+			if ((l = findLabelByAddr(lbls, data1)) != -1) {
+				sprintf(out_s, "$%08x<%s>", data1, lbls->labels[l].name);
+			} else {
+				sprintf(out_s, "$%08x", data1);
+			}
 			*absaddr = data1;
 		}	break;
 		case 8  : {
 			const int data1 = getword(gBuf);
 			const int data2 = getword(gBuf);
-			sprintf(out_s, "$%04x%04x", data1, data2);
+			int l;
+			if ((l = findLabelByAddr(lbls, (data1 << 16) | data2)) != -1) {
+				sprintf(out_s, "$%04x%04x<%s>", data1, data2, lbls->labels[l].name);
+			} else {
+				sprintf(out_s, "$%04x%04x", data1, data2);
+			}
 			*absaddr = (data1<<16) | data2;
 		} break;
 		case 11 : {
@@ -284,7 +295,12 @@ void sprintmode(Buffer *gBuf, Labels *lbls, unsigned int mode, unsigned int reg,
 					break;
 				case 2 : {
 					const int data2 = getword(gBuf);
-					sprintf(out_s, "#$%04x%04x", data1, data2);
+					int l;
+					if ((l = findLabelByAddr(lbls, (data1 << 16) | data2)) != -1) {
+						sprintf(out_s, "#$%04x%04x<%s>", data1, data2, lbls->labels[l].name);
+					} else {
+						sprintf(out_s, "#$%04x%04x", data1, data2);
+					}
 					*absaddr = (data1<<16) | data2;
 				} break;
 			}
@@ -320,7 +336,7 @@ int disasm(Buffer *buf, unsigned long int start, unsigned long int end, Labels *
 	bufferSeek(buf, start);
 
 	int absaddr;
-	while (!bufferIsEOF(buf) && (address < end)) {
+	while (!bufferIsEOF(buf, address) && (address < end)) {
 		if (!rawmode) {
 			int pos;
 			char label[MAXLABELLEN+1];
@@ -474,12 +490,12 @@ int disasm(Buffer *buf, unsigned long int start, unsigned long int end, Labels *
 						const int data = getword(buf);
 						char source_s[50];
 						switch(size) {
-							case 0 : sprintf(source_s, "#$%02X", (data & 0x00FF));
+							case 0 : sprintf(source_s, "#$%02x", (data & 0x00FF));
 								break;
-							case 1 : sprintf(source_s, "#$%04X", data);
+							case 1 : sprintf(source_s, "#$%04x", data);
 								break;
 							case 2 :
-								sprintf(source_s, "#$%04X%04X", data, getword(buf));
+								sprintf(source_s, "#$%04x%04x", data, getword(buf));
 								break;
 						}
 

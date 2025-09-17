@@ -1,3 +1,4 @@
+#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -32,11 +33,11 @@ int sectionGetCh(Section *b) {
 	return *(b->_curptr++);
 }
 
-int sectionSeek(Section *b, int offset) {
-	if (offset < 0) return b->_curptr - b->_bytes;
-	if (offset >= b->_len) return -1;
-	b->_curptr = b->_bytes + offset;
-	return 0;
+int sectionSeek(Section *b, int addr) {
+	if (addr < 0) return b->_curptr - b->_bytes;
+	if (addr - b->_baseaddress >= b->_len) return -1;
+	b->_curptr = b->_bytes + addr - b->_baseaddress;
+	return addr;
 }
 
 int sectionLen(Section *b) {
@@ -60,14 +61,12 @@ Buffer *newBuffer(void) {
 	return b;
 }
 
-int bufferGetCh(Buffer *b) {
-	return sectionGetCh(&b->sections[0]);
-}
-
-int bufferSeek(Buffer *b, int offset) {
+int bufferSeek(Buffer *b, int addr) {
+	b->curaddress = addr;
 	for(int s = 0; s < b->len; s++) {
-		if (b->sections[s]._baseaddress <= offset && offset < b->sections[s]._baseaddress + b->sections[s]._len)
-			sectionSeek(&b->sections[s], offset);
+		if (b->sections[s]._baseaddress <= addr && addr < b->sections[s]._baseaddress + b->sections[s]._len) {
+			return sectionSeek(&b->sections[s], addr);
+		}
 	}
 	return -1;
 }
@@ -75,7 +74,23 @@ int bufferSeek(Buffer *b, int offset) {
 int bufferLen(Buffer *b /*, int section*/) {
 	return b->sections[0]._len;
 }
-	
+
+int bufferGetCh(Buffer *b) {
+	int addr = b->curaddress++;
+	for(int s = 0; s < b->len; s++) {
+		if (b->sections[s]._baseaddress <= addr && addr < b->sections[s]._baseaddress + b->sections[s]._len) {
+			int ret = sectionGetCh(&b->sections[s]);
+			if (ret != -1) return ret;
+			// look in the next section.
+		}
+	}
+	if (addr < b->sections[b->len-1]._baseaddress + b->sections[b->len-1]._len) {
+		assert(!!"Should not be here");
+		return 0; // Unmapped memory
+	}
+	return -1;
+}
+
 int bufferGetAt(Buffer *b, int offset) {
 	for(int s = 0; s < b->len; s++) {
 		if (b->sections[s]._baseaddress <= offset && offset < b->sections[s]._baseaddress + b->sections[s]._len)
@@ -85,8 +100,8 @@ int bufferGetAt(Buffer *b, int offset) {
 	return -1;
 }
 
-int bufferIsEOF(Buffer *b) {
-	return sectionIsEOF(&b->sections[0]);
+int bufferIsEOF(Buffer *b, int addr) {
+	return (addr >= b->sections[b->len-1]._baseaddress + b->sections[b->len-1]._len);
 }
 
 void bufferAddSection(Buffer *b, int base, int len, char *name) {

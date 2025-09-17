@@ -19,6 +19,7 @@ struct Buffer {
 	Section *sections;
 	int len;
 	int cap;
+	int curaddress;
 };
 
 Buffer *newBuffer(void);
@@ -26,8 +27,8 @@ int bufferGetCh(Buffer *b);
 int bufferSeek(Buffer *b, int offset); // Negative offset returns current.
 int bufferLen(Buffer *b);
 int bufferGetAt(Buffer *b, int offset);
-int bufferIsEOF(Buffer *b);
-int bufferIsEOS(Buffer *b); // End of Section
+int bufferIsEOF(Buffer *b, int addr);
+//int bufferIsEOS(Buffer *b, ); // End of Section
 void bufferAddSection(Buffer *b, int base, int len, char *name);
 void bufferIsMappedAddr(Buffer *b, int addr); // Check that addr is in a segment.
 // don't cache these: the indices change when sections are added.
@@ -69,6 +70,7 @@ void addLabel(Labels *ls, char *name, int addr, int generated); // Strdups the n
 void freadLabels(FILE *fp, Labels *);
 int searchLabelsByAddr(Labels *labels, int key); // Return insertion point
 int findLabelByAddr(Labels *labels, int key); // Return -1 if not found
+int findLabelByName(Labels *labels, char *key); // Return -1 if not found
 
 extern void loadmap(char *name);
 

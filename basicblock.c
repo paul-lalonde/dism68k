@@ -100,6 +100,9 @@ void findBasicBlocks(Buffer *bin, int *leaders, int nleaders, BasicBlock **outbl
 	// First pass: find all reachable code and mark leaders
 	while (stackTop > 0) {
 		int addr = stack[--stackTop];
+if (addr > 0x00f00000) {
+	assert(addr > 0x00f00000);
+}
 		if (addr >= endAddr || visited[addr]) continue;
 		Labels labels = {.len = 0};
 		struct Instruction inst;
@@ -123,20 +126,14 @@ void findBasicBlocks(Buffer *bin, int *leaders, int nleaders, BasicBlock **outbl
 			if (inst.targetAddress < endAddr) {
 				isLeader[inst.targetAddress] = true;
 				if (!visited[inst.targetAddress]) {
-	if (inst.targetAddress == -1) {
-		(void)(nextAddr);
-	}
 					stack[stackTop++] = inst.targetAddress;
 				}
 			}
-			
-			// Instruction after branch is a leader (for conditional branches)
+
+			// Instruction after branch is a leader (for conditional branches, not for subroutine returns)
 			if (inst.isBranch && (nextAddr < endAddr)) {
 				isLeader[nextAddr] = true;
 				if (!visited[nextAddr]) {
-	if (nextAddr == -1) {
-		(void)(nextAddr);
-	}
 					stack[stackTop++] = nextAddr;
 				}
 			}
@@ -146,9 +143,6 @@ void findBasicBlocks(Buffer *bin, int *leaders, int nleaders, BasicBlock **outbl
 			// Continue to next instruction
 			if (nextAddr < endAddr) {
 				if (!visited[nextAddr]) {
-	if (nextAddr == -1) {
-		(void)(nextAddr);
-	}
 					stack[stackTop++] = nextAddr;
 				}
 			}
@@ -206,23 +200,16 @@ void findBasicBlocks(Buffer *bin, int *leaders, int nleaders, BasicBlock **outbl
 
 	int len = blockCount;
 	for (int i = 1; i < len; i ++) {
-		int startAddr = blocks[i].begin;
-		int endAddr = blocks[i].end;
-		int ninstr = blocks[i].ninstr;
+		BasicBlock b = blocks[i];
+		int startAddr = b.begin;
 		int j = i - 1;
 		
 		while (j >= 0 && blocks[j].begin > startAddr) {
-			blocks[j + 1].begin = blocks[j].begin;
-			blocks[j + 1].end = blocks[j].end;
-			blocks[j + 1].ninstr = blocks[j].ninstr;
+			blocks[j + 1] = blocks[j];
 			j -= 1;
 		}
 		
-		blocks[j + 1].begin = startAddr;
-		blocks[j + 1].end = endAddr;
-		blocks[j + 1].ninstr = ninstr;
-		blocks[j + 1].isdata = 0;
-		blocks[j + 1].nlines = ninstr;
+		blocks[j + 1] = b;
 	}
 
 	// Find data sections - they lie between basic blocks; we insert them.
@@ -237,16 +224,14 @@ void findBasicBlocks(Buffer *bin, int *leaders, int nleaders, BasicBlock **outbl
 			}
 			// Shift blocks up
 			for(int j = blockCount - 1; j >= i; j--) {
-				blocks[j ].begin = blocks[j-1].begin;
-				blocks[j ].end = blocks[j-1].end;
-				blocks[j ].ninstr = blocks[j-1].ninstr;
-				blocks[j ].isdata = blocks[j-1].isdata;
+				blocks[j] = blocks[j-1];
 			}
+			// Build the data block
 			blocks[i].begin = blocks[i].end;
 			blocks[i].end = blocks[i+1].begin;
 			blocks[i].ninstr = 0; //((blocks[i].end - blocks[i].begin)+7) % 8; // we will present at most 16 bytes per line; instrs count in pairs
 			blocks[i].nlines = 1;
-			blocks[i].isdata = true;			
+			blocks[i].isdata = true;
 		}
 	}
 			

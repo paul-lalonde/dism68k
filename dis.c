@@ -205,6 +205,14 @@ int ntab = 0;
 void mymvwprint(char *s, int addr, void *d) {
 	int row = (int)(uintptr_t)d;
 	wmove(diswin, row, 0);
+	int l;
+	if ((l = findLabelByAddr(state.labels, addr)) == -1) {
+		wprintw(diswin, "%08x", addr);
+		//ntab--;
+	} else {
+		wprintw(diswin, "%18s:", state.labels->labels[l].name);
+		ntab -= 2;
+	}
 	for(int i=0;i<ntab;i++) wprintw(diswin, "\t");
 	wprintw(diswin, "%s", s);
 }	
@@ -287,6 +295,7 @@ void hexmoveselection(int oldpos, int pos) {
 void styleline(int line, int on, int attr) {
 	int nrows, ncols;
 	getmaxyx(diswin, nrows, ncols);
+	(void)nrows;
 	int r = line - state.topline;
 	if (r > LINES-1 || r < 0) return;
 	for (int c = 0; c < ncols; c++) {
@@ -395,8 +404,14 @@ void markasdata(int begin, int end) {
 }
 
 int search(char *s) {
-	(void)(s);
-	return state.offset;
+	static char str[128]; // Static to store last search
+	sscanf(s, "%127s", str);
+	if (str[0] == 0) return -1;
+	
+	// Lazy initial search, just find a label; later also find uses
+	int idx = findLabelByName(state.labels, str);
+	if (idx < 0) return -1;
+	return state.labels->labels[idx].addr;
 }
 
 int exec(char *s) {
@@ -407,6 +422,7 @@ int exec(char *s) {
 	// Might have an address in front.
 	char ch;
 	char str[128];
+	str[0] = 0;
 	unsigned int addr;
 	int matches = sscanf(s, "%x%c%127s", &addr, &ch, str);
 	if (matches == 0) {
@@ -427,6 +443,7 @@ int exec(char *s) {
 			strcat(s, "labels.txt");
 		}
 		FILE *fp = fopen(s+1, "w");
+		assert(fp != NULL);
 		for(int i=0; i < state.labels->len; i++) {
 			if (!state.labels->labels[i].generated)
 				fprintf(fp,"%0x %s\n", state.labels->labels[i].addr, state.labels->labels[i].name);
@@ -564,15 +581,22 @@ void interact(Buffer *buf, Labels *labels, BasicBlock *blocks, int nblocks) {
 				Message("Command: %s", buf);
 				}
 				break;
-		case '/': // Search
+		case '/': // Search for label
 				{
 				char buf[128];
 				nodelay(cmd, FALSE);
 				echo();
-				mvwaddch(cmd, 0,0, ':');
+				mvwaddch(cmd, 0,0, '/');
 				mvwgetnstr(cmd, 0,1, buf, 128);
 				noecho();
-				repeats = search(buf);
+				int addr;
+				if ((addr = search(buf)) == -1) {
+					Message("Not found: %s", buf);
+					break;
+				}
+				repeats = addr;
+				wclear(cmd);
+				wrefresh(cmd);
 				}
 				/* FALLTHROUGH */
 		case 'g':
@@ -733,10 +757,14 @@ int main(int argc, char **argv)
 	char *inbase = "W2SYS";
 	int opt;
 	int isboot=0;
-	while ((opt = getopt(argc, argv, "b")) != -1) {
+	int interactive=0;
+	while ((opt = getopt(argc, argv, "bi")) != -1) {
 		switch(opt) {
 		case 'b':
 			isboot = true;
+			break;
+		case 'i':
+			interactive = true;
 			break;
 		}
 	}
@@ -791,7 +819,22 @@ int main(int argc, char **argv)
 	nleaders++;
 	leaders[nleaders] = 0x3b634;
 	nleaders++;
+	leaders[nleaders] = 0x02a5fa;
+	nleaders++;
+	leaders[nleaders] = 0x02a698;
+	nleaders++;
+	leaders[nleaders] = 0x02a6a2;
+	nleaders++;
+	leaders[nleaders] = 0x02a6a4;
+	nleaders++;
+	leaders[nleaders] = 0x02a6ac;
+	nleaders++;
+	leaders[nleaders] = 0x02a6b4;
+	nleaders++;
+	leaders[nleaders] = 0x002a6be;
+	nleaders++;
 
+ 
 		// Waldorf sets some high bits on ROM addresses.  
 		
 
@@ -827,6 +870,8 @@ int main(int argc, char **argv)
 		}
 	}
 	fclose(outfile);
+
+	if (!interactive) return 0;
 	
 	bufferSeek(buf, 0);
 
