@@ -1,0 +1,17 @@
+0404 DeadOrFeed
+100a Entry
+104e Init
+114a EnableIntrs
+125a SetIntrVectors
+1aa0 s_TestingPerf
+1c62 d_Vectors
+2262 Printf
+ee18 EnterDiagnostics
+21796 PasswordMaybe
+2a6c6 KeyPrint
+f00596 intr_service_maybe
+f004e2 try_boot
+f01804 vector_open_file
+f01808 vector_load_bin_at_A0
+f02398 load_bin_at_A0
+
