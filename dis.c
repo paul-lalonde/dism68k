@@ -14,6 +14,10 @@
 #define ROWPREFIX 10
 
 int hexwidth;
+char *infilename;
+char *labelsname;
+char *disasmname;
+
 
 /* Size of each input chunk to be
    read and allocate for. */
@@ -440,7 +444,7 @@ int exec(char *s) {
 		break;
 	case 'p':
 		if (str[0] == 0) {
-			strcat(s, "labels.txt");
+			strcat(s, labelsname);
 		}
 		FILE *fp = fopen(s+1, "w");
 		assert(fp != NULL);
@@ -772,9 +776,9 @@ int main(int argc, char **argv)
 		inbase = argv[optind];
 	}
  (void)(isboot);
-	char *infilename; asprintf(&infilename, "%s.BIN", inbase);
-	char *labelsname; asprintf(&labelsname,"%s.lbls", inbase);
-	char *disasmname; asprintf(&disasmname, "%s.lst", inbase);
+	asprintf(&infilename, "%s.BIN", inbase);
+	asprintf(&labelsname,"%s.lbls", inbase);
+	asprintf(&disasmname, "%s.lst", inbase);
 	//kill(getpid(), SIGSTOP);
 	Labels *labels = newLabels(1);
 	state.labels = labels;
@@ -809,34 +813,28 @@ int main(int argc, char **argv)
 
 	int *leaders = NULL;
 	int nleaders = 0;
-	leaders = malloc(sizeof(int)*3);
+	fp = fopen("leaders.txt", "r");
+	if (fp == NULL) {
+		fprintf(stderr, "Could not open leaders.txt file\n");
+		exit(-1);
+	}
+	int lcap = 2;
+	leaders = malloc(sizeof(int)*lcap);
+	nleaders = 0;
 	leaders[nleaders] = bufferGetAt(buf, 0xf00004);
 	leaders[nleaders] = (leaders[nleaders] << 8) | bufferGetAt(buf, 0xf00005);
 	leaders[nleaders] = (leaders[nleaders] << 8) | bufferGetAt(buf, 0xf00006);
 	leaders[nleaders] = (leaders[nleaders] << 8) | bufferGetAt(buf, 0xf00007);
-	nleaders++;;
-	leaders[nleaders] = 0x1000;
 	nleaders++;
-	leaders[nleaders] = 0x3b634;
-	nleaders++;
-	leaders[nleaders] = 0x02a5fa;
-	nleaders++;
-	leaders[nleaders] = 0x02a698;
-	nleaders++;
-	leaders[nleaders] = 0x02a6a2;
-	nleaders++;
-	leaders[nleaders] = 0x02a6a4;
-	nleaders++;
-	leaders[nleaders] = 0x02a6ac;
-	nleaders++;
-	leaders[nleaders] = 0x02a6b4;
-	nleaders++;
-	leaders[nleaders] = 0x002a6be;
-	nleaders++;
-
+	int num;
+	while( 1 == fscanf(fp, "%x", &num) ) {
+		if (nleaders + 1 >= lcap) {
+			lcap *= 2;
+			leaders = realloc(leaders, sizeof(int)*lcap);
+		}
+		leaders[nleaders++] = num;
+	}
  
-		// Waldorf sets some high bits on ROM addresses.  
-		
 
 	// Calculate basic blocks
 	BasicBlock *blocks=0;
@@ -849,7 +847,7 @@ int main(int argc, char **argv)
 	int l;
 	for(int i = 0; i < nblocks; i++) {
 		char str[128];
-		sprintf(str, "\t# Block %d:%06x-%06x: line %d", i, blocks[i].begin, blocks[i].end, blocks[i].lineno); 
+		//sprintf(str, "\t# Block %d:%06x-%06x: line %d", i, blocks[i].begin, blocks[i].end, blocks[i].lineno); 
 		for(int addr = blocks[i].begin; addr < blocks[i].end; ) {
 			if ((l = findLabelByAddr(labels, addr)) != -1) {
 //				fprintf(outfile, "%08x", addr);

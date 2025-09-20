@@ -1,6 +1,6 @@
 CC = gcc
 CFLAGS = -g -std=c99 -pedantic -Wall
-OBJECTS = dis.o dis68k.o label.o basicblock.o buffer.o
+OBJECTS = dis.o dis68k.o label.o basicblock.o buffer.o winmgr.o
 
 all: dis
 

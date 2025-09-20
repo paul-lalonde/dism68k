@@ -1294,13 +1294,17 @@ int datadump(Buffer *buf, uint32_t start, uint32_t end, void (*write)(char *, in
 	char asm[128];
 	int lineaddr = address;
 	asm[0] = 0;
+	int outbuf[16];
+	char obuf[32];
 
 	// print in linesof 16 bytes
 	for(int i = (address & ~0xf); i < ((end + 0xf)&~0xf); i++) {
 		if (i < start || i >= end) {
 			strcat(asm, " ");
+			outbuf[i%16] = -1;
 		} else {
 			int byte = getbyte(buf);
+			outbuf[i%16] = byte;
 			 if (isprint(byte)) {
 				char s[2];
 				s[0] = byte; s[1] = 0;
@@ -1310,9 +1314,18 @@ int datadump(Buffer *buf, uint32_t start, uint32_t end, void (*write)(char *, in
 		}
 
 		if ((i & 0xf) == 15) {
-			if (restrictline < 0) strcat(asm,"\n");
-			if (restrictline < 0 || nlines == restrictline)
+			if (restrictline < 0 || nlines == restrictline) {
+				strcat(asm, "\t");
+				for(int j=0;j<16;j++) {
+					if (outbuf[j] == -1) strcat(asm, "   ");
+					else {
+						sprintf(obuf, "%02x ", outbuf[j]);			
+						strcat(asm, obuf);
+					}
+				}
+				if (restrictline < 0) strcat(asm,"\n");
 				write(asm, lineaddr, d);
+			}
 			if (nlines == restrictline) 
 				return i > end ? end : i+1;
 			asm[0] = 0;
