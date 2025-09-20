@@ -12,11 +12,15 @@
 
 #define ROWWIDTH 16 // Hex displays 16 bytes per row.  Suck it.
 #define ROWPREFIX 10
+#define HEXON 0
 
 int hexwidth;
 char *infilename;
 char *labelsname;
 char *disasmname;
+char *commentsname;
+
+WINDOW *_hex, *diswin, *cmd;
 
 
 /* Size of each input chunk to be
@@ -101,7 +105,9 @@ int readall(FILE *in, Buffer *buf, int loadaddr, char *sectionName)
 	return READALL_OK;
 }
 
-WINDOW *hex, *diswin, *cmd;
+void writecomments(char *filename) {
+	
+}
 
 void Message(char *s, ...) {
 	char *buf; 
@@ -120,8 +126,9 @@ void Unimplemented(char *s) {
 	Message(s);
 }
 
-// Fill 
-void fill(Buffer *buf, int pos, int top, int bottom, attr_t attrs, int addrcolor, int fillcolor) {
+
+void fillhex(Buffer *buf, int pos, int top, int bottom, attr_t attrs, int addrcolor, int fillcolor) {
+	WINDOW *hex = _hex;
 	attr_t oattrs;
 	short color;
 	scrollok(hex, 0);
@@ -180,7 +187,8 @@ void initColors(void) {
 	init_pair(DATAMODE, COLOR_BLACK, COLOR_YELLOW);
 }
 
-void stylebyte(int pos, int on, int attr) {
+void hexstylebyte(int pos, int on, int attr) {
+	WINDOW *hex = _hex;
 	int r, c;
 	chtype ch0, ch1;
 	offsettoscreen(pos, &r, &c);
@@ -195,13 +203,13 @@ void stylebyte(int pos, int on, int attr) {
 	}
 }
 
-void blink(int pos, int on) {
-	stylebyte(pos, on, A_BLINK);
-	stylebyte(pos+1, on, A_BLINK);
+void hexblink(int pos, int on) {
+	hexstylebyte(pos, on, A_BLINK);
+	hexstylebyte(pos+1, on, A_BLINK);
 }
 void hexstandout(int pos, int on) {
-	stylebyte(pos, on, A_STANDOUT);
-	stylebyte(pos+1, on, A_STANDOUT);
+	hexstylebyte(pos, on, A_STANDOUT);
+	hexstylebyte(pos+1, on, A_STANDOUT);
 }
 
 
@@ -260,7 +268,11 @@ int filldisline(Buffer *bin, int addr, int row, BasicBlock *blocks, int nblocks,
 }
 
 void hexmoveselection(int oldpos, int pos) {
+#if !HEXON
+	return;
+#endif
 	int r, c;
+	WINDOW *hex = _hex;
 
 	int color = NORMALMODE;
 	if (state.datamode) color = DATAMODE;
@@ -268,7 +280,7 @@ void hexmoveselection(int oldpos, int pos) {
 
 	// Remove old highlight
 	hexstandout(oldpos, 0);
-	blink(oldpos, 0);
+	hexblink(oldpos, 0);
 
 	int hy, hx;
 	getmaxyx(hex, hy, hx); // Macro.
@@ -281,16 +293,16 @@ void hexmoveselection(int oldpos, int pos) {
 		state.windowoffset -= nlines * ROWWIDTH;
 		// We now have to fill lines between oldoffset and pos.
 		if (nlines > hy) nlines = hy;
-		fill(state.buf, state.windowoffset, 0, nlines, 0, NORMALMODE, color);
+		fillhex(state.buf, state.windowoffset, 0, nlines, 0, NORMALMODE, color);
 	} else if (r >= hy) {
 		int nlines = r - hy + 1; 
 		wscrl(hex, nlines);
 		state.windowoffset += nlines * ROWWIDTH;
-		fill(state.buf, state.windowoffset + (hy-nlines)*ROWWIDTH, hy-nlines, hy, 0, NORMALMODE, color);
+		fillhex(state.buf, state.windowoffset + (hy-nlines)*ROWWIDTH, hy-nlines, hy, 0, NORMALMODE, color);
 	}
 	
 	hexstandout(pos, 1);
-	blink(pos, 1);
+	hexblink(pos, 1);
 	wmove(hex, r,c);
 
 	wrefresh(hex);
@@ -407,6 +419,16 @@ void markasdata(int begin, int end) {
 	Unimplemented("markasdata");
 }
 
+void writelabels(char * labelsname) {
+		FILE *fp = fopen(labelsname, "w");
+		assert(fp != NULL);
+		for(int i=0; i < state.labels->len; i++) {
+			if (!state.labels->labels[i].generated)
+				fprintf(fp,"%0x %s\n", state.labels->labels[i].addr, state.labels->labels[i].name);
+		}
+		fclose(fp);
+}
+
 int search(char *s) {
 	static char str[128]; // Static to store last search
 	sscanf(s, "%127s", str);
@@ -444,15 +466,9 @@ int exec(char *s) {
 		break;
 	case 'p':
 		if (str[0] == 0) {
-			strcat(s, labelsname);
-		}
-		FILE *fp = fopen(s+1, "w");
-		assert(fp != NULL);
-		for(int i=0; i < state.labels->len; i++) {
-			if (!state.labels->labels[i].generated)
-				fprintf(fp,"%0x %s\n", state.labels->labels[i].addr, state.labels->labels[i].name);
-		}
-		fclose(fp);
+			writelabels(labelsname);
+		} else 
+			writelabels(str);
 		break;
 	case 'q':
 		return TRUE;
@@ -491,33 +507,34 @@ void interact(Buffer *buf, Labels *labels, BasicBlock *blocks, int nblocks) {
 	memset(state.lineAddresses, 0, sizeof(int)*(LINES-1));
 
 	// 01234567: 0123 4567  0123 4567  0123 4567  0123 4567 
+#if HEXON
+	editmode = HEXEDITOR;
 	hexwidth = 8 + 2 + 4 * 11;
+	_hex = newwin(LINES-1, hexwidth, 0, 0);
+	scrollok(_hex, 1);
+	wmove(_hex, 0, 0);
+	wclear(_hex);
+	wrefresh(_hex);
+	// Fill the first screen
+	attron(COLOR_PAIR(NORMALMODE));
+	fillhex(buf, 0, 0, LINES, 0, NORMALMODE, NORMALMODE);	
+	hexmoveselection(0,0);
+	wrefresh(_hex);
+#else
+	editmode = DISASMEDITOR;
+	hexwidth = 0;
+#endif
 	int diswidth = COLS - hexwidth;
-	hex = newwin(LINES-1, hexwidth, 0, 0);
-	box(hex,0,0);
 	diswin = newwin(LINES-1, diswidth, 0, hexwidth);
-	scrollok(diswin, 0);
 	cmd = newwin(1, COLS, LINES-1, 0);
-	box(cmd,0,0);
-	
-	wprintw(hex, "Hex output");
-	scrollok(hex, 1);
-	wmove(hex, 0, 0);
-	wrefresh(hex);
+
+	scrollok(diswin, 0);
 
 	refilldis(buf, state.lineAddresses[0], blocks, nblocks, labels);
 	wrefresh(diswin);
-	wprintw(cmd, ":read %d bytes", bufferLen(buf));
+	wprintw(cmd, "read %d bytes", bufferLen(buf));
 	wmove(cmd, 0, 0);
 	wrefresh(cmd);
-
-	// Fill the first screen
-	attron(COLOR_PAIR(NORMALMODE));
-	fill(buf, 0, 0, LINES, 0, NORMALMODE, NORMALMODE);
-	
-	hexmoveselection(0,0);
-
-	wrefresh(hex);
 
 	// Show the disassembly
 	dismoveselection(buf, blocks, nblocks, labels, state.line, state.line);
@@ -530,7 +547,6 @@ void interact(Buffer *buf, Labels *labels, BasicBlock *blocks, int nblocks) {
 
 	while (1) {
 		char ch = getch();
-		if ( ch == 27 ) return;
 
 		char cbuf[512];
 		sprintf(cbuf, "                                                        Received keystroke '%c'", ch);
@@ -566,10 +582,12 @@ void interact(Buffer *buf, Labels *labels, BasicBlock *blocks, int nblocks) {
 		if (hascount == 0 && strchr("hjkl\06\02", ch)) 
 			repeats = 1;
 
+#if HEXON
 		if (ch == '	') {
 			editmode ^= 1;
 			Message("Changed mode: %d\n", editmode);
 		}
+#endif
 		// common mode
 		int handled = 1;
 		switch(ch) {
@@ -620,14 +638,7 @@ void interact(Buffer *buf, Labels *labels, BasicBlock *blocks, int nblocks) {
 					dismoveselection(buf, blocks, nblocks, labels, state.line, state.line);
 				}
 				break;
-/*		case 'G': 
-				oldoffset = state.offset;
-				if (hascount==0) repeats = state.buf->len-1;
-				state.offset = repeats;
-				if (state.offset > bufferLen(state.buf)) state.offset = bufferLen(state.buf);
-				hexmoveselection(oldoffset, state.offset);
-				break;
-*/
+
 		default:
 				handled = 0;
 		}
@@ -779,6 +790,7 @@ int main(int argc, char **argv)
 	asprintf(&infilename, "%s.BIN", inbase);
 	asprintf(&labelsname,"%s.lbls", inbase);
 	asprintf(&disasmname, "%s.lst", inbase);
+	asprintf(&commentsname, "%s.ann", inbase);
 	//kill(getpid(), SIGSTOP);
 	Labels *labels = newLabels(1);
 	state.labels = labels;
@@ -875,6 +887,9 @@ int main(int argc, char **argv)
 
 	if (!setjmp(bailout))
 		interact(buf, labels, blocks, nblocks);
+
+	writelabels(labelsname);
+	writecomments(commentsname);
 
 	endwin();			/* End curses mode		  */
 	return 0;
