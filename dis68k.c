@@ -645,8 +645,10 @@ int disasm(Buffer *buf, unsigned long int start, unsigned long int end, Labels *
 							if (!rawmode) {
 								int label = findLabelByAddr(labels, address+offset);
 								char buf[128];
-								if (label != -1) sprintf(buf, "<%s>", labels->labels[label].name);
-								else buf[0] = 0;
+								if (label != -1) {
+									sprintf(buf, "<%s>", labels->labels[label].name);
+									instr.targetlabel = labels->labels[label].name;
+								} else buf[0] = 0;
 								sprintf(operand_s, "$%08x%s", address + offset, buf);
 							} else {
 								sprintf(operand_s, "*%+d", offset);
@@ -658,8 +660,10 @@ int disasm(Buffer *buf, unsigned long int start, unsigned long int end, Labels *
 							if (!rawmode) {
 								int label = findLabelByAddr(labels, address - 2 + offset);
 								char buf[128];
-								if (label != -1) sprintf(buf, "<%s>", labels->labels[label].name);
-								else buf[0] = 0;
+								if (label != -1) {
+									sprintf(buf, "<%s>", labels->labels[label].name);
+									instr.targetlabel = labels->labels[label].name;
+								} else buf[0] = 0;
 								sprintf(operand_s, "$%08x%s" , address - 2 + offset, buf);
 							} else {
 								sprintf(operand_s, "*%+d", offset);

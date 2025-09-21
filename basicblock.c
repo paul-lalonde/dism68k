@@ -31,9 +31,6 @@ int countlines(Buffer *bin, BasicBlock *blocks, int nblocks) {
 		// Count lines in bb.
 		int count = 0;
 		for(int j=0; j < blocks[i].instructions->len; j++) {
-			if (blocks[i].instructions->instrs[j].isRet) {
-				blocks[i].instructions->instrs[j].nlines++;
-			}
 			blocks[i].instructions->instrs[j].lineno = lineno+count;
 			count += blocks[i].instructions->instrs[j].nlines;
 		}
@@ -275,10 +272,6 @@ if (addr > 0x00f00000) {
 						instr.address = linestartaddr;
 						instr.isdata = 1;
 						instr.nlines = 1; linestartaddr = j +1;
-						if (j > end) {
-							instr.nlines++;
-							blocks[i].nlines++;
-						}
 						blocks[i].nlines++;
 						appendInstruction(blocks[i].instructions, instr);
 					}

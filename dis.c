@@ -434,6 +434,7 @@ int search(char *s) {
 				return -1;
 			}
 			b = 0;
+			wrapped = 1;
 		}
 		IList *il = state.blocks[b].instructions;
 		int startline=0, endline = state.blocks[b].nlines;
@@ -451,13 +452,6 @@ int search(char *s) {
 			}
 		}
 	}
-		
-/*	
-	// Lazy initial search, just find a label; later also find uses
-	int idx = findLabelByName(state.labels, str);
-	if (idx < 0) return -1;
-	return state.labels->labels[idx].addr;
-*/
 }
 
 static char searchbuf[128];
@@ -490,7 +484,68 @@ void search_first(void) {
 	wrefresh(cmd);
 	search_next();
 }
-				
+
+int backsearch(char *s) {
+	static char str[128]; // Static to store last search
+	sscanf(s, "%127s", str);
+	if (str[0] == 0) return -1;
+	int wrapped = 0;
+	int bb = findBBbyline(state.blocks, state.nblocks, state.line-1);
+	for(int b = bb; ; b--) {
+		if (b == 0) {
+			if (wrapped) {
+				Message("Not found '%s'", str);
+				return -1;
+			}
+			wrapped = 1;
+			b = state.nblocks-1;
+		}
+		IList *il = state.blocks[b].instructions;
+		int startline=state.blocks[b].nlines-1, endline = 0;
+		if (!wrapped && b == bb) {
+			startline = (state.line-1) - state.blocks[b].lineno;
+		}
+		if (wrapped && b == bb) {
+			endline = (state.line) - (state.blocks[b].lineno + state.blocks[b].nlines);
+		}
+		for(int i = startline; i >= endline; i--) {
+			if ((il->instrs[i].targetlabel && strncmp(il->instrs[i].targetlabel, str, strlen(str)) == 0)
+				|| (il->instrs[i].label && strncmp(il->instrs[i].label, str, strlen(str)) == 0)
+				|| (il->instrs[i].sourcelabel && strncmp(il->instrs[i].sourcelabel, str, strlen(str)) == 0)) {
+				return state.blocks[b].lineno+i;
+			}
+		}
+	}
+}
+
+void bsearch_next(void) {
+	int line;
+	if ((line = backsearch(searchbuf)) == -1) {
+		Message("Not found: %s", searchbuf);
+		return;
+	}
+	int oldline = state.line;
+	int r = line - state.topline;
+	if (r >= 0 && r < LINES-1) {
+		state.line = line;
+		dismoveselection(state.buf, state.blocks, state.nblocks, state.labels, oldline, state.line);
+	} else {
+		showLine(&state, line);
+		state.line = line;
+		dismoveselection(state.buf, state.blocks, state.nblocks, state.labels, state.line, state.line);
+	}
+}
+
+void bsearch_first(void) {
+	nodelay(cmd, FALSE);
+	echo();
+	mvwaddch(cmd, 0,0, '?');
+	mvwgetnstr(cmd, 0,1, searchbuf, 128);
+	noecho();
+	wclear(cmd);
+	wrefresh(cmd);
+	bsearch_next();
+}		
 
 int exec(char *s) {
 	// This should really be a little language, like ed.
@@ -661,6 +716,8 @@ void interact(Buffer *buf, Labels *labels, BasicBlock *blocks, int nblocks) {
 				break;
 		case '/': // Search for label
 				search_first();
+				break;
+		case '?': 	bsearch_first();
 				break;			
 		case 'g':
 				oldline = state.line;
@@ -778,6 +835,9 @@ void interact(Buffer *buf, Labels *labels, BasicBlock *blocks, int nblocks) {
 				break;
 		case 'n':
 				search_next();	
+				break;
+		case 'N':
+				bsearch_next();
 				break;
 		}
 		
