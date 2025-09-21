@@ -237,21 +237,29 @@ int filldisline(Buffer *bin, int line, int row, BasicBlock *blocks, int nblocks,
 
 	for(int i = 0; i < blocks[bb].nlines; ) {
 		inst = blocks[bb].instructions->instrs[i];
-		if (inst.lineno == line) {
-			char *label = inst.label;
-			if (label != NULL) {
-				mvwprintw(diswin, row, 0, "%06x", inst.address);
-				mvwprintw(diswin, row, 20 - strlen(label) - 2 , "%s: ", label);
+		if (inst.lineno <= line && line < inst.lineno + inst.nlines) {
+			if (line == inst.lineno) {
+				char *label = inst.label;
+				if (label != NULL) {
+					mvwprintw(diswin, row, 0, "%06x", inst.address);
+					mvwprintw(diswin, row, 20 - strlen(label) - 2 , "%s: ", label);
+				} else {
+					mvwprintw(diswin, row, 0, "%06x ", inst.address);
+				}
+				mvwprintw(diswin, row, 20, "%s", inst.asm);
 			} else {
-				mvwprintw(diswin, row, 0, "%06x ", inst.address);
+				for(int l = 0; l < inst.nlines; l++) {
+					if (line == l + inst.lineno) {
+						wclrtoeol(diswin);
+						break;
+					}
+				}
 			}
-
-			mvwprintw(diswin, row, 20, "%s", inst.asm);
-			return inst.nlines;
+			return 1;
 		}
 		i += inst.nlines;
 	}
-	return -1; // We're probably in a data segment...
+	assert(!"Should not have reached");
 }
 
 void hexmoveselection(int oldpos, int pos) {

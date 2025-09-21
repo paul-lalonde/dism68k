@@ -104,6 +104,8 @@ struct Instruction {
 	int lineno;
 	int nlines; // Usually 1, sometimes more when comment has newlines.
 	char *label; // Never owned.
+	char *targetlabel; // Never owned
+	char *sourcelabel;
 
 	enum OperandType src, dst;
 	enum IncrType prepost; 

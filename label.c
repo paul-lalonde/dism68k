@@ -29,7 +29,7 @@ int findLabelByAddr(Labels *labels, int key) {
 
 int findLabelByName(Labels *labels, char *key) {
 	for(int i=0; i < labels->len; i++) {
-		if (strcmp(labels->labels[i].name, key) == 0)
+		if (strncmp(labels->labels[i].name, key, strlen(key)) == 0)
 			return i;
 	}
 	return -1;

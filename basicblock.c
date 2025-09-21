@@ -32,8 +32,6 @@ int countlines(Buffer *bin, BasicBlock *blocks, int nblocks) {
 		int count = 0;
 		for(int j=0; j < blocks[i].instructions->len; j++) {
 			if (blocks[i].instructions->instrs[j].isRet) {
-				blocks[i].instructions->instrs[j].asm = realloc(blocks[i].instructions->instrs[j].asm, strlen(blocks[i].instructions->instrs[j].asm) + 2);
-				strcat(blocks[i].instructions->instrs[j].asm, "\n");
 				blocks[i].instructions->instrs[j].nlines++;
 			}
 			blocks[i].instructions->instrs[j].lineno = lineno+count;
@@ -278,8 +276,6 @@ if (addr > 0x00f00000) {
 						instr.isdata = 1;
 						instr.nlines = 1; linestartaddr = j +1;
 						if (j > end) {
-							instr.asm = realloc(instr.asm, strlen(instr.asm) + 2);
-							strcat(instr.asm, "\n");
 							instr.nlines++;
 							blocks[i].nlines++;
 						}
