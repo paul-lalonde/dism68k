@@ -24,11 +24,6 @@ int findAddr(int addr, BasicBlock *blocks, int nblocks) {
 	return l;
 }
 
-int countlines_n;
-void count(char *s, int addr, void*d) {
-	countlines_n ++;
-}
-
 // Counts lines and fixes up nlines.
 int countlines(Buffer *bin, BasicBlock *blocks, int nblocks) {
 	int lineno = 0;
@@ -39,9 +34,9 @@ int countlines(Buffer *bin, BasicBlock *blocks, int nblocks) {
 			if (blocks[i].instructions->instrs[j].isRet) {
 				blocks[i].instructions->instrs[j].asm = realloc(blocks[i].instructions->instrs[j].asm, strlen(blocks[i].instructions->instrs[j].asm) + 2);
 				strcat(blocks[i].instructions->instrs[j].asm, "\n");
-				blocks[i].instructions->instrs[j].lineno = lineno+count;
 				blocks[i].instructions->instrs[j].nlines++;
 			}
+			blocks[i].instructions->instrs[j].lineno = lineno+count;
 			count += blocks[i].instructions->instrs[j].nlines;
 		}
 		blocks[i].lineno = lineno; 
@@ -51,7 +46,7 @@ int countlines(Buffer *bin, BasicBlock *blocks, int nblocks) {
 	return lineno;
 }
 
-void findBasicBlocks(Buffer *bin, int *leaders, int nleaders, BasicBlock **outblocks, int *nblocks, int **invalid, int *ninvalid) {
+void findBasicBlocks(Buffer *bin, int *leaders, int nleaders, BasicBlock **outblocks, int *nblocks, int **invalid, int *ninvalid, Labels *labels) {
 	BasicBlock *blocks = NULL;
 	int blockCount = 0;
 	int blockCapacity = 0;
@@ -100,10 +95,9 @@ if (addr > 0x00f00000) {
 	assert(addr > 0x00f00000);
 }
 		if (addr >= endAddr || visited[addr]) continue;
-		Labels labels = {.len = 0};
 		struct Instruction inst;
 		memset(&inst, 0, sizeof(inst));
-		if (!disasmone(bin, addr, &inst, &labels)) {
+		if (!disasmone(bin, addr, &inst, labels)) {
 			// Invalid instruction
 			if (invalidCount >= invalidCapacity) {
 				invalidCapacity = invalidCapacity ? invalidCapacity * 2 : 16;
@@ -158,8 +152,7 @@ if (addr > 0x00f00000) {
 		// Find end of basic block
 		while (currentAddr < endAddr && visited[currentAddr]) {
 			struct Instruction inst;
-			Labels labels = {.len = 0};
-			if (!disasmone(bin, currentAddr, &inst, &labels)) {
+			if (!disasmone(bin, currentAddr, &inst, labels)) {
 				break;
 			}
 			appendInstruction(ilist, inst);

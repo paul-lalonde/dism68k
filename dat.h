@@ -126,7 +126,7 @@ extern int disasm(Buffer *bin, unsigned long int start, unsigned long int end, L
 extern int disasmone(Buffer *bin, int start, Instruction *retval, Labels *labels);
 int datadump(Buffer *gBuf, uint32_t start, uint32_t end, void (*write)(char *, int addr, void *), void *d, int restrictline);
 
-void findBasicBlocks(Buffer *bin, int *leaders, int nleaders, BasicBlock **out, int *outlen, int **invalid, int *ninvalid);
+void findBasicBlocks(Buffer *bin, int *leaders, int nleaders, BasicBlock **out, int *outlen, int **invalid, int *ninvalid, Labels *labels);
 int findAddr(int addr, BasicBlock *blocks, int nblocks);
 int findBBbyline(BasicBlock *blocks, int nblocks, int line);
 int linetoaddr(Buffer *bin, BasicBlock *blocks, int nblocks, int line);
