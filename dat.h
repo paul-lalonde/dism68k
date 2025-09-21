@@ -55,6 +55,7 @@ struct BasicBlock {
 	int lineno, nlines;
 	int isdata;
 	int nbytes;
+	IList *instructions;
 };
 
 struct Program {
@@ -89,15 +90,20 @@ enum OperandType {
 
 // Representation of a m68k instruction
 struct Instruction {
-	char *asm;
-	char *instr;
+	char *asm;	// Always owned
+	char *instr;	// Always owned
 	int address;
+	int isdata;  
 	int opnum;
 	int nbytes; // encoding size
 	int isBranch;
 	int isJump;
 	int isRet;
 	int targetAddress;
+	char *comment; // Never owned
+	int lineno;
+	int nlines; // Usually 1, sometimes more when comment has newlines.
+	char *label; // Never owned.
 
 	enum OperandType src, dst;
 	enum IncrType prepost; 
@@ -113,7 +119,7 @@ struct IList {
 IList *newIList(void);
 void freeIList(IList *);
 void clearIList(IList *);
-void appendInstruction(IList *, int addr, Instruction);
+void appendInstruction(IList *, Instruction);
 
 int rundis(Buffer *bin, BasicBlock *blocks, int nblocks, Labels *labels, IList *instrs);
 extern int disasm(Buffer *bin, unsigned long int start, unsigned long int end, Labels *labels, IList *, int justOne);

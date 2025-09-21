@@ -96,7 +96,7 @@ int bufferGetAt(Buffer *b, int offset) {
 		if (b->sections[s]._baseaddress <= offset && offset < b->sections[s]._baseaddress + b->sections[s]._len)
 			return sectionGetAt(&b->sections[s], offset-b->sections[s]._baseaddress);
 	}
-	panic("bufferGetAt offset %d not mapped\n", offset);
+	panic("bufferGetAt offset %0x not mapped\n", offset);
 	return -1;
 }
 

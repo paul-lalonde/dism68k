@@ -239,13 +239,13 @@ int filldisline(Buffer *bin, int addr, int row, BasicBlock *blocks, int nblocks,
 		int rval = datadump(bin, blocks[bb].begin, blocks[bb].end, mymvwprint, (void*)(uintptr_t)(row), row+state.topline - blocks[bb].lineno);
 		return rval;	
 	} 
-	int l;
-	for(int a = blocks[bb].begin; a < blocks[bb].end; ) {
-		disasmone(bin, a, &inst, labels);
+	for(int i = 0; i < blocks[bb].ninstr; i++) {
+		inst = blocks[bb].instructions->instrs[i];
 		if (inst.address == addr) {
-			if ((l = findLabelByAddr(labels, addr)) != -1) {
+			char *label = blocks[bb].instructions->instrs[i].label;
+			if (label != NULL) {
 				mvwprintw(diswin, row, 0, "%08x", addr);
-				mvwprintw(diswin, row, 20 - strlen(labels->labels[l].name) - 2 , "%s: ", labels->labels[l].name);
+				mvwprintw(diswin, row, 20 - strlen(label) - 2 , "%s: ", label);
 			} else {
 				mvwprintw(diswin, row, 0, "%08x ", addr);
 			}
@@ -260,8 +260,6 @@ int filldisline(Buffer *bin, int addr, int row, BasicBlock *blocks, int nblocks,
 				}
 			}
 			return nextaddr;
-		} else {
-			a += inst.nbytes;
 		}
 	}
 	return -1; // We're probably in a data segment...
@@ -472,6 +470,10 @@ int exec(char *s) {
 		break;
 	case 'q':
 		return TRUE;
+	case 'c':
+		// Comment at current instruction.
+		Unimplemented("Comment");
+		break;
 			
 	}
 	return FALSE;
@@ -852,31 +854,24 @@ int main(int argc, char **argv)
 	BasicBlock *blocks=0;
 	int nblocks, *invalid, ninvalid;
 	findBasicBlocks(buf, leaders, nleaders, &blocks, &nblocks, &invalid, &ninvalid);
-	generateLabels(labels, blocks, nblocks);
+	//generateLabels(labels, blocks, nblocks);
 	
+
+	// TODO(PAL): Should not need to disasmone anymore, instead pulling it all from BasicBlock->instructions
 	FILE *outfile = fopen(disasmname, "w");
-	Instruction instr;
 	int l;
 	for(int i = 0; i < nblocks; i++) {
 		char str[128];
 		//sprintf(str, "\t# Block %d:%06x-%06x: line %d", i, blocks[i].begin, blocks[i].end, blocks[i].lineno); 
-		for(int addr = blocks[i].begin; addr < blocks[i].end; ) {
-			if ((l = findLabelByAddr(labels, addr)) != -1) {
-//				fprintf(outfile, "%08x", addr);
-				fprintf(outfile, "%16s: ", labels->labels[l].name);
-			} else {
-				fprintf(outfile, "%08x\t", addr);
-			}
-			if (blocks[i].isdata) {
-				if (addr == blocks[i].begin) ntab = 2;
-				datadump(buf, blocks[i].begin, blocks[i].end, myfprint, outfile, -1);
-				addr = blocks[i].end;
-				continue;
-			}
-			disasmone(buf, addr, &instr, state.labels);
-			fprintf(outfile, "\t\t%s%s\n", instr.asm, str);
+	//	for(int addr = blocks[i].begin; addr < blocks[i].end; ) {
+		for(int j = 0; j< blocks[i].instructions->len; j++) {
+			
+			l = findLabelByAddr(labels, blocks[i].instructions->instrs[j].address);
+			fprintf(outfile, "%06x", blocks[i].instructions->instrs[j].address);
+			fprintf(outfile, "%16s%s\t", l==-1?"":labels->labels[l].name, l==-1?" ":":");
+			
+			fprintf(outfile, "%s%s\n", blocks[i].instructions->instrs[j].asm, str);
 			str[0] = 0;
-			addr += instr.nbytes;
 		}
 	}
 	fclose(outfile);

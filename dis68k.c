@@ -352,6 +352,7 @@ int disasm(Buffer *buf, unsigned long int start, unsigned long int end, Labels *
 		}
 		Instruction instr;
 		memset(&instr, 0, sizeof(instr));
+		instr.nlines = 1; // Default.
 		instr.address = address;
 //		const uint32_t start_address = address;
 		const int word = getword(buf);
@@ -1255,7 +1256,7 @@ int disasm(Buffer *buf, unsigned long int start, unsigned long int end, Labels *
 			asprintf(&instr.asm, "%-8s %s", opcode_s, operand_s);
 			instr.nbytes = address - instr.address;
 			gBufprintf("%-8s %s\n", opcode_s, operand_s);
-			appendInstruction(output, instr.address, instr);
+			appendInstruction(output, instr);
 		} else {
 			gBufprintf("???\n");
 			if (justone) return 0;
@@ -1339,7 +1340,7 @@ int datadump(Buffer *buf, uint32_t start, uint32_t end, void (*write)(char *, in
 void addinstr(char *s, int addr, void *d) {
 	IList *instrs = (IList *)d;
 	Instruction inst = {.asm=s, .address=addr};
-	appendInstruction(instrs, addr, inst);
+	appendInstruction(instrs, inst);
 }
 
 int rundis(Buffer *bin, BasicBlock *blocks, int nblocks, Labels *labels, IList *instrs) {

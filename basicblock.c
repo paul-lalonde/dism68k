@@ -1,22 +1,12 @@
-/* 
-Hi Claude. Write me a C function that given a motorola 68000 binary program will build a list of basic blocks of that program.
-The signature of the function should be 'void findBasicBlocks(unsigned char *bin, int binlen, int outarray, int *outarraylen, int invalid, int *ninvalid)'
-The binary to disassemble is passed in as bin and is binlen bytes long.
-The function returns an array of integer pairs stored sequentially indicating the start and end addresses of every basic block. The array should be resized automatically as it grows.  
-If the walk to find basic blocks meets an invalid instruction, flag it by adding it to the invalid array.
-To disassemble the binary, call the function "extern bool disasmoneone(char *bin, int binlen, int start, Instruction *retval);
-"; The instruction type is 'struct Instruction { int address; int nbytes; bool isBranch; bool isRet; int targetAddress; }' The field nbytes gives you the instruction boundaries. If the instruction is a branch, isBranch will be set. If the instruction is a return from subroute, isRet will be set. If the instruction is a branch, targetAddress will be set to the target address.  To use disasmone pass the whole binary in, and pass the offset within that binary at which to disassemble in 'start'.  disasmone returns true if the instruction was valid, false if it could not be decoded.
-The basic blocks should be returned in sorted order.  If you must sort, remember that basic blocks are already in almost sorted order.
-Also write another function that given the basic blocks list will return a list of begin,end pairs of integers corresponding to regions of the binary that are not included in the basic blocks.  This list should be in ordered from lowest begining address to highest.
-The function signature should be 'findDataRegions(int *basicblocks,  int **retpairs, int *retcount)'. don't worry about data found after the last basic block.
-Avoid using any external libraries.  If you need help with instruction decoding, ask for help. Do not explain your work. If you find the task too difficult, pause and ask me for help. If you need clarification, pause and ask for help.
-*/
 #include <assert.h>
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
+#include <string.h>
 #include "dat.h"
 
+#define MIN(X,Y) ((X)<(Y)?(X):(Y))
 // returns offset of basic block.
 int findAddr(int addr, BasicBlock *blocks, int nblocks) {
 	int l, r, m;
@@ -43,14 +33,20 @@ void count(char *s, int addr, void*d) {
 int countlines(Buffer *bin, BasicBlock *blocks, int nblocks) {
 	int lineno = 0;
 	for(int i=0; i < nblocks; i++) {
-		blocks[i].lineno = lineno;
-		if (blocks[i].isdata) {
-			countlines_n = 0;
-			datadump(bin, blocks[i].begin, blocks[i].end, count, NULL, -1);
-			lineno += countlines_n;
-			blocks[i].nlines = countlines_n;
+		// Count lines in bb.
+		int count = 0;
+		for(int j=0; j < blocks[i].instructions->len; j++) {
+			if (blocks[i].instructions->instrs[j].isRet) {
+				blocks[i].instructions->instrs[j].asm = realloc(blocks[i].instructions->instrs[j].asm, strlen(blocks[i].instructions->instrs[j].asm) + 2);
+				strcat(blocks[i].instructions->instrs[j].asm, "\n");
+				blocks[i].instructions->instrs[j].lineno = lineno+count;
+				blocks[i].instructions->instrs[j].nlines++;
+			}
+			count += blocks[i].instructions->instrs[j].nlines;
 		}
-		else lineno += blocks[i].ninstr;
+		blocks[i].lineno = lineno; 
+		blocks[i].nlines = count; 
+		lineno += blocks[i].nlines;
 	}
 	return lineno;
 }
@@ -106,6 +102,7 @@ if (addr > 0x00f00000) {
 		if (addr >= endAddr || visited[addr]) continue;
 		Labels labels = {.len = 0};
 		struct Instruction inst;
+		memset(&inst, 0, sizeof(inst));
 		if (!disasmone(bin, addr, &inst, &labels)) {
 			// Invalid instruction
 			if (invalidCount >= invalidCapacity) {
@@ -156,6 +153,7 @@ if (addr > 0x00f00000) {
 		int blockStart = addr;
 		int currentAddr = addr;
 		int ninstr = 0;
+		IList *ilist = newIList();
 
 		// Find end of basic block
 		while (currentAddr < endAddr && visited[currentAddr]) {
@@ -164,6 +162,7 @@ if (addr > 0x00f00000) {
 			if (!disasmone(bin, currentAddr, &inst, &labels)) {
 				break;
 			}
+			appendInstruction(ilist, inst);
 			
 			ninstr++;
 			int nextAddr = currentAddr + inst.nbytes;
@@ -188,6 +187,8 @@ if (addr > 0x00f00000) {
 				blocks[blockCount].ninstr = ninstr;
 				blocks[blockCount].lineno = -1;
 				blocks[blockCount].isdata = 0;
+				blocks[blockCount].instructions = ilist;
+				blocks[blockCount].nlines = 1;
 				blockCount++;
 				break;
 			}
@@ -213,6 +214,8 @@ if (addr > 0x00f00000) {
 	}
 
 	// Find data sections - they lie between basic blocks; we insert them.
+	// We construct data sections from Instruction objects tagged as data.  
+	// We assign aligned 16 byte chunks to new lines.  These can get split when labeling sub-parts.
 	for(int i = 1; i < blockCount; i++) {
 		if (blocks[i-1].end != blocks[i].begin) {
 			// Add block
@@ -230,8 +233,68 @@ if (addr > 0x00f00000) {
 			blocks[i].begin = blocks[i].end;
 			blocks[i].end = blocks[i+1].begin;
 			blocks[i].ninstr = 0; //((blocks[i].end - blocks[i].begin)+7) % 8; // we will present at most 16 bytes per line; instrs count in pairs
-			blocks[i].nlines = 1;
 			blocks[i].isdata = true;
+			// Build the "instructions"
+			char asm[512];
+			int outbuf[16];
+			int start = blocks[i].begin;
+			int end = blocks[i].end;
+			int endSection = bufferSectionByAddr(bin, start);
+			end = MIN(blocks[i].end, bin->sections[endSection]._baseaddress + bin->sections[endSection]._len);
+			int address = start;
+			asm[0] = 0;
+			bufferSeek(bin, blocks[i].begin);
+			blocks[i].instructions = newIList();
+			for(int addr = blocks[i].begin; addr < blocks[i].end; addr++) {
+				// print in linesof 16 bytes
+				int linestartaddr = addr;
+				for(int j = (address & ~0xf); j < ((end + 0xf)&~0xf); j++) {
+					if (j < start || j >= end) {
+						strcat(asm, " ");
+						outbuf[j%16] = -1;
+					} else {
+						int byte = bufferGetAt(bin, address++);
+						outbuf[j%16] = byte;
+						 if (isprint(byte)) {
+							char s[2];
+							s[0] = byte; s[1] = 0;
+							strcat(asm, s);
+						} else
+							strcat(asm, ".");
+					}
+
+					if ((j & 0xf) == 15) {
+						strcat(asm, "\t");
+						Instruction instr;
+						memset(&instr, 0, sizeof(instr));
+						instr.nbytes = 0;
+						for(int k=0;k<16;k++) {
+							if (outbuf[k] == -1) strcat(asm, "   ");
+							else {
+								char obuf[8];
+								sprintf(obuf, "%02x ", outbuf[k]);			
+								strcat(asm, obuf);
+								instr.nbytes++;
+								addr++;
+							}
+						}
+						// Add a line to the last inst of a data block.
+							
+						instr.asm = strdup(asm); asm[0] = 0;
+						instr.address = linestartaddr;
+						instr.isdata = 1;
+						instr.nlines = 1; linestartaddr = j +1;
+						if (j > end) {
+							instr.asm = realloc(instr.asm, strlen(instr.asm) + 2);
+							strcat(instr.asm, "\n");
+							instr.nlines++;
+							blocks[i].nlines++;
+						}
+						blocks[i].nlines++;
+						appendInstruction(blocks[i].instructions, instr);
+					}
+				}
+			}
 		}
 	}
 			
