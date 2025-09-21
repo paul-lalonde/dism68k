@@ -645,7 +645,7 @@ int disasm(Buffer *buf, unsigned long int start, unsigned long int end, Labels *
 							if (!rawmode) {
 								int label = findLabelByAddr(labels, address+offset);
 								char buf[128];
-								if (label != -1) sprintf(buf, "(%s)", labels->labels[label].name);
+								if (label != -1) sprintf(buf, "<%s>", labels->labels[label].name);
 								else buf[0] = 0;
 								sprintf(operand_s, "$%08x%s", address + offset, buf);
 							} else {

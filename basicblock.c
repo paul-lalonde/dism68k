@@ -112,7 +112,7 @@ if (addr > 0x00f00000) {
 		
 		if (inst.isBranch || inst.isJump) {
 			// Target of branch is a leader
-			if (inst.targetAddress < endAddr) {
+			if (inst.targetAddress && inst.targetAddress < endAddr) {
 				isLeader[inst.targetAddress] = true;
 				if (!visited[inst.targetAddress]) {
 					stack[stackTop++] = inst.targetAddress;
@@ -314,7 +314,7 @@ int findBBbyline(BasicBlock *blocks, int nblocks, int line) {
 	while (l <= r) {
 		m = l + (r - l) / 2;
 
-		if (line >= blocks[m].lineno  && line < blocks[m+1].lineno)
+		if (line >= blocks[m].lineno  && line < blocks[m].lineno+blocks[m].nlines)
 			return m;
  
 		if (blocks[m].lineno < line )
