@@ -165,7 +165,7 @@ typedef struct {
 	int topline;
 	int bblock; // index of first basic block on our screen.
 	IList *instructions; // Instructions currently in dispad?
-	int *lineAddresses;
+	int *lineBB; // Basic block this line is in.
 	
 } State;
 
@@ -233,6 +233,7 @@ void mymvwprint(char *s, int addr, void *d) {
 int filldisline(Buffer *bin, int line, int row, BasicBlock *blocks, int nblocks, Labels *labels) {
 	// find the basic block containing addr, disassemble it until we get to addr
 	int bb = findBBbyline(blocks, nblocks, line);
+	state.lineBB[row] = bb;
 	Instruction inst;
 
 	for(int i = 0; i < blocks[bb].nlines; ) {
@@ -614,8 +615,8 @@ void interact(Buffer *buf, Labels *labels, BasicBlock *blocks, int nblocks) {
 	refresh();
 
 	// Must happen after ncurses setup.
-	state.lineAddresses = malloc(sizeof(int) * (LINES-1));
-	memset(state.lineAddresses, 0, sizeof(int)*(LINES-1));
+	state.lineBB = malloc(sizeof(int) * (LINES-1));
+	memset(state.lineBB, 0, sizeof(int)*(LINES-1));
 
 	// 01234567: 0123 4567  0123 4567  0123 4567  0123 4567 
 #if HEXON
@@ -641,7 +642,7 @@ void interact(Buffer *buf, Labels *labels, BasicBlock *blocks, int nblocks) {
 
 	scrollok(diswin, 0);
 
-	refilldis(buf, state.lineAddresses[0], blocks, nblocks, labels);
+	refilldis(buf, state.topline, blocks, nblocks, labels);
 	wrefresh(diswin);
 	wprintw(cmd, "read %d bytes", bufferLen(buf));
 	wmove(cmd, 0, 0);
@@ -817,9 +818,9 @@ void interact(Buffer *buf, Labels *labels, BasicBlock *blocks, int nblocks) {
 				if (state.line >= (blocks[nblocks-1].lineno + blocks[nblocks-1].ninstr)) 
 					state.line = blocks[nblocks-1].lineno + blocks[nblocks-1].ninstr;
 				dismoveselection(buf, blocks, nblocks, labels, oldline, state.line);
-				oldoffset = state.offset;
-				state.offset = state.lineAddresses[state.line-state.topline];
-				hexmoveselection(oldoffset, state.offset);
+				//oldoffset = state.offset;
+				//state.offset = state.lineAddresses[state.line-state.topline];
+				//hexmoveselection(oldoffset, state.offset);
 				break;
 		case 0x02:  //^b
 				repeats *= LINES/2;
@@ -829,9 +830,9 @@ void interact(Buffer *buf, Labels *labels, BasicBlock *blocks, int nblocks) {
 				state.line-=repeats;
 				if (state.line < 0) state.line = 0;
 				dismoveselection(buf, blocks, nblocks, labels, oldline, state.line);
-				oldoffset = state.offset;
-				state.offset = state.lineAddresses[state.line-state.topline];
-				hexmoveselection(oldoffset, state.offset);
+				//oldoffset = state.offset;
+				//state.offset = state.lineAddresses[state.line-state.topline];
+				//hexmoveselection(oldoffset, state.offset);
 				break;
 		case 'n':
 				search_next();	
